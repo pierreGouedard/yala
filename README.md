@@ -1,2 +1,3 @@
-# yala
-Yet Another Learning Algorithm
+# YALA
+
+Yet Another Learning Algorithm.
