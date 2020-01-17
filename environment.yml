@@ -3,6 +3,7 @@ name: yala-env
 dependencies:
   - python==3.7
   - pytest==5.2.2
+  - scikit-learn==0.21.3
   - ipython
   - pip
   - pip:
