@@ -1,5 +1,5 @@
 # Global import
-from firing_graph.core.data_structure.graph import FiringGraph, extract_structure
+from firing_graph.core.data_structure.graph import FiringGraph
 
 from scipy.sparse import csc_matrix, lil_matrix, hstack, vstack
 import numpy as np
@@ -17,6 +17,7 @@ class TesStructure(unittest.TestCase):
         # Set firing graph to create base structure
         self.n_inputs, self.n_outputs, self.n_vertices = 100, 10, 2
         self.n_core_bs, self.depth_bs = 5, 4
+        self.drainer_params, self.expected_precision = {'t': 100, 'weight': 1, 'p': 1, 'q': 1}, 0.5
         self.ax_C_bs = np.array([
             [False, False, True, True, False],
             [False, False, False, True, False],
@@ -60,6 +61,7 @@ class TesStructure(unittest.TestCase):
 
         """
         yala = Yala()
+        yala.drainer_params.update(self.drainer_params)
 
         for partition in self.firing_graph1.partitions:
 
@@ -88,6 +90,9 @@ class TesStructure(unittest.TestCase):
             self.assertTrue(structure.I[partition['indices_inputs'][ind][1], int(is_output_flipped)] == 0)
             self.assertTrue(structure.I[partition['indices_inputs'][ind][2], int(is_output_flipped)] == 0)
 
+            # Make sure precision is well computed
+            self.assertAlmostEqual(structure.precision, self.expected_precision, delta=1e-2)
+
     def test_update_base_structures(self):
         """
         python -m unittest tests.units.test_structure_operations.TesStructure.test_update_base_structures
@@ -95,6 +100,7 @@ class TesStructure(unittest.TestCase):
         """
 
         yala = Yala()
+        yala.drainer_params.update(self.drainer_params)
 
         for partition in self.firing_graph2.partitions:
 
@@ -152,8 +158,7 @@ def create_partition_base(n_inputs, n_outputs, n_vertices, sax_I, sax_O, sax_C, 
 
             # Update structure
             sax_I[l_input_indices, j] = 1
-            sax_score[l_input_indices, j] = 1
-            sax_score[l_input_indices[0], j] += 1
+            sax_I[l_input_indices[0], j] += 1
             sax_C[j, partitions[-1]['indices'][-1]] = 1
 
             # Add ground of truth to partitions
@@ -166,9 +171,6 @@ def create_partition_base(n_inputs, n_outputs, n_vertices, sax_I, sax_O, sax_C, 
         sax_I.tocsc(), sax_C.tocsc(), sax_O.tocsc(), ax_levels, mask_matrices=d_masks, depth=3,
         partitions=partitions
     )
-
-    # Set score
-    firing_graph.backward_firing['i'] = sax_score
 
     return firing_graph
 
@@ -185,9 +187,10 @@ def create_partition_augment(n_inputs, n_outputs, n_vertices, sax_I, sax_O, sax_
             'indices': [n_core + i for i in range(n_vertices)],
             'indices_inputs_transient': [],
             'depth': 5,
+            'precision': 0,
             'partitions': [
                 {'indices': [i for i in range(5)], 'name': 'base', 'depth': 4},
-                {'indices': [5 + i for i in range(n_vertices - 7)], 'name': 'transient', 'depth': 3}
+                {'indices': [5 + i for i in range(n_vertices - 7)], 'name': 'transient', 'depth': 3},
             ]
         })
 
@@ -212,8 +215,7 @@ def create_partition_augment(n_inputs, n_outputs, n_vertices, sax_I, sax_O, sax_
 
             # Update structure
             sax_I[l_input_indices, j] = 1
-            sax_score[l_input_indices, j] = 1
-            sax_score[l_input_indices[0], j] += 1
+            sax_I[l_input_indices[0], j] += 1
             sax_C[j, partitions[-1]['indices'][-3]] = 1
 
             # Add ground of truth to partitions
@@ -229,8 +231,5 @@ def create_partition_augment(n_inputs, n_outputs, n_vertices, sax_I, sax_O, sax_
         sax_I.tocsc(), sax_C.tocsc(), sax_O.tocsc(), ax_levels, mask_matrices=d_masks, depth=5,
         partitions=partitions
     )
-
-    # Set score
-    firing_graph.backward_firing['i'] = sax_score
 
     return firing_graph
