@@ -11,10 +11,12 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.preprocessing import OneHotEncoder
 import xgboost
+from scipy.sparse import spmatrix
 
 # Local import
 from src.utils.names import KVName
 from src.utils.features import FoldManager
+from src.model.yala import Yala
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -389,13 +391,16 @@ def get_model(model_name, model_params):
         return xgboost.XGBClassifier(**model_params), {}
 
     elif model_name == 'yala':
-        raise NotImplementedError
+        return Yala(**model_params), {}
 
     else:
         raise ValueError('Model name not understood: {}'.format(model_name))
 
 
 def get_score(scoring, yhat, y, average='macro', labels=None):
+
+    if isinstance(y, spmatrix):
+        y = y.toarray().argmax(axis=1)
 
     if scoring == 'precision':
         if labels is None and average is not None:
@@ -405,6 +410,8 @@ def get_score(scoring, yhat, y, average='macro', labels=None):
 
     elif scoring == 'accuracy':
         score = accuracy_score(y, yhat)
+        import IPython
+        IPython.embed()
 
     elif scoring == 'balanced_accuracy':
         score = balanced_accuracy_score(y, yhat)

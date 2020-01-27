@@ -1,9 +1,10 @@
 # Global imports
 from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
-from sklearn.preprocessing import OneHotEncoder
 import numpy as np
+from scipy.sparse import csc_matrix
 
 # Local import
+from src.tools.encoder import HybridEncoder, CatEncoder
 
 
 class FoldManager(object):
@@ -143,7 +144,7 @@ class FeatureBuilder(object):
     positions. Its transformation pipeline is composed of:
     """
 
-    def __init__(self, method=None, cat_cols=None, target_name='target'):
+    def __init__(self, method=None, cat_cols=None, num_cols=None, target_name='target', target_tranform=None):
         """
 
         Attributes
@@ -154,8 +155,10 @@ class FeatureBuilder(object):
         token_delimiter : str
             Delimiter that is used to seperate token in text input.
         """
-        self.method, self.target_name, self.cat_cols = method, target_name, cat_cols
-        self.model, self.label_encoder, self.is_built = None, None, None
+        self.method, self.target_name, self.cat_cols, self.num_cols = method, target_name, cat_cols, num_cols
+        self.target_tranform = target_tranform
+
+        self.model, self.target_encoder, self.is_built = None, None, None
 
     def build(self, df_data=None, params=None, force_train=False):
         """
@@ -181,10 +184,20 @@ class FeatureBuilder(object):
         if self.model is None or force_train:
 
             if self.method == 'cat_encode':
-                self.model = OneHotEncoder(
+                self.model = CatEncoder(
                     handle_unknown='ignore', sparse=params.get('sparse', False), dtype=params.get('dtype', bool)
                 )
                 self.model.fit(df_data[self.cat_cols])
+
+            elif self.method == 'cat_num_encode':
+                self.model = HybridEncoder(num_cols=self.num_cols, cat_cols=self.cat_cols,  **params)
+                self.model.fit(df_data[self.cat_cols + self.num_cols])
+
+            else:
+                raise ValueError('Method not implemented: {}'.format(self.method))
+
+            if self.target_tranform == 'sparse_encoding':
+                self.target_encoder = CatEncoder().fit(df_data[[self.target_name]])
 
         self.is_built = True
 
@@ -219,10 +232,22 @@ class FeatureBuilder(object):
                 X, df_data[[c for c in df_data.columns if c not in self.cat_cols and c != self.target_name]]
             ))
 
+        elif self.method == 'cat_num_encode':
+            X = self.model.transform(df_data)
+
         else:
             X = df_data[[c for c in df_data.columns if c != self.target_name]].values
 
         if target:
-            return X, df_data.loc[:, self.target_name].values
+            if self.target_tranform == 'sparse_encoding':
+                y = self.target_encoder.transform(df_data[[self.target_name]])
+
+            elif self.target_tranform == 'sparse_boolean':
+                y = csc_matrix(df_data[[self.target_name]].values > 0)
+
+            else:
+                y = df_data.loc[:, self.target_name].values
+
+            return X, y
 
         return X

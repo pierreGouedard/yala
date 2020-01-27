@@ -1,7 +1,7 @@
 import numpy as np
-from scipy.sparse import csc_matrix
+import pandas as pd
+from scipy.sparse import csc_matrix, hstack
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.tree import DecisionTreeClassifier
 
 
 class NumEncoder(object):
@@ -69,7 +69,11 @@ class NumEncoder(object):
             self.bins = {i: x for i, x in enumerate(np.linspace(self.bounds[0], self.bounds[1], self.n_bins))}
 
         elif self.method == 'signal':
+            # Reduce n_bins if necessary and compute bounds
+            self.n_bins = min(len(np.unique(X)), self.n_bins)
             max_, min_ = max(X), min(X)
+
+            # Fit from bounds
             self.fit_from_bound(max_, min_)
 
         elif self.method == 'quantile':
@@ -179,3 +183,76 @@ class CatEncoder(OneHotEncoder):
 
     """
 
+
+class HybridEncoder():
+
+    def __init__(self, cat_cols, num_cols, params_num_enc, params_cat_enc):
+        """
+
+        :param cat_cols:
+        :param num_cols:
+        :param params_num_enc:
+        :param params_cat_enc:
+        """
+
+        # Save cat and numerical columns name or indices
+        self.cat_cols = cat_cols
+        self.num_cols = num_cols
+
+        # Create encoders
+        self.cat_enc =CatEncoder(**params_cat_enc)
+        self.num_encs = {n: NumEncoder(**params_num_enc) for n in num_cols}
+        self.map_encoders = None
+
+    def fit_transform(self, X, y=None):
+        """
+        Fit 2D array X and transform its values.
+
+        :param X: 2D array of numerical values
+        :type X: 2D numpy array
+        :param y: Array of target class (not used)
+        :return: Array of encoded numerical values
+        :rtype: 2D numpy array
+
+        """
+        self.fit(X, y)
+        return self.transform(X)
+
+    def fit(self, X, y=None):
+        """
+        Build a set of discrete values from numerical value of the 2D array X.
+
+        :param X: 2D array of numerical values
+        :type X: 2D numpy array
+        :param y: Array of target class (not used)
+        :return: Current instance of the class
+        :rtype: self
+
+        """
+        # Fit categorical encoder
+        self.cat_enc.fit(self.get_array_from_input(X, self.cat_cols))
+
+        # Fit numerical encoders
+        for ind in self.num_cols:
+            self.num_encs[ind].fit(self.get_array_from_input(X, [ind]))
+
+    def transform(self, X):
+        # Transform categorical features
+        X_encoded = self.cat_enc.transform(self.get_array_from_input(X, self.cat_cols))
+
+        # transform numericals features
+        for ind in self.num_cols:
+            X_encoded = hstack([X_encoded, self.num_encs[ind].transform(self.get_array_from_input(X, [ind]))])
+
+        return X_encoded.tocsc()
+
+    @staticmethod
+    def get_array_from_input(X, l_indices):
+        if isinstance(X, pd.DataFrame):
+            return X[l_indices].values
+
+        elif isinstance(X, np.ndarray):
+            return X[:, l_indices]
+
+        else:
+            raise ValueError('Data type {} not understood'.format(type(X)))
