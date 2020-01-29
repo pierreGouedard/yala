@@ -400,7 +400,11 @@ def get_model(model_name, model_params):
 def get_score(scoring, yhat, y, average='macro', labels=None):
 
     if isinstance(y, spmatrix):
-        y = y.toarray().argmax(axis=1)
+        if y.shape[1] == 1:
+            y = y.toarray()[:, 0]
+
+        else:
+            y = y.toarray().argmax(axis=1)
 
     if scoring == 'precision':
         if labels is None and average is not None:
@@ -410,8 +414,6 @@ def get_score(scoring, yhat, y, average='macro', labels=None):
 
     elif scoring == 'accuracy':
         score = accuracy_score(y, yhat)
-        import IPython
-        IPython.embed()
 
     elif scoring == 'balanced_accuracy':
         score = balanced_accuracy_score(y, yhat)

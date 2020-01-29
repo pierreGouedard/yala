@@ -12,7 +12,7 @@ inputs = {
     'train': {'path': features_path, 'name': 'train.csv'}
 }
 outputs = {
-    'model': {'path': models_path, 'name': 'yala.pickle'},
+    'model': {'path': models_path, 'name': 'model=yala.pickle'},
 }
 
 parameters = {
@@ -30,19 +30,8 @@ params_folds = {
     }
 }
 
-# Parameters for decision tree
-sampling_rate = 0.8,
-n_sampled_vertices = 10,
-max_iter = 10,
-learning_rate = 5e-2,
-p_flip = 0.5,
-batch_size = 500,
-firing_graph = None,
-t = None,
-min_firing = 10
-
 params_yala = {
-    'sampling_rate': 0.8, 'n_sampled_vertices': 2, 'max_iter': 2, 'learning_rate': 2e-1, 'p_flip': 0.,
+    'sampling_rate': 0.8, 'n_sampled_vertices': 5, 'max_iter': 2, 'learning_rate': 2e-1, 'p_flip': 0,
     'batch_size': 800, 'min_firing': 15
 }
 params_yala_grid = {}

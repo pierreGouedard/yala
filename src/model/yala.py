@@ -36,7 +36,8 @@ class Yala(object):
                  t=None,
                  min_firing=10,
                  max_precision=0.9,
-                 treshold_precision=0.5
+                 treshold_precision=0.5,
+                 overlap_rate=0.5
                  ):
 
         # Core parameter of the algorithm
@@ -47,11 +48,15 @@ class Yala(object):
         self.p_flip = p_flip
         self.max_precision = max_precision
         self.treshold_precision = treshold_precision
+        self.overlap_rate = overlap_rate
+        self.batch_size = batch_size
 
         # Core attributes
         self.firing_graph = firing_graph
         self.drainer_params = {'t': t, 'min_firing': min_firing, 'batch_size': batch_size}
         self.min_firing = min_firing
+        self.n_outputs = None
+        self.n_inputs = None
         self.imputer = None
         self.sampler = None
         self.drainer = None
@@ -59,7 +64,7 @@ class Yala(object):
     def __init_parameters(self, y):
 
         # Set batch sizefrom signal
-        batch_size, t, t_max = min(y.shape[0], self.drainer_params['batch_size']), y.shape[0], y.shape[0]
+        t, t_max = y.shape[0], y.shape[0]
 
         # Set core params from signal and current firing graph
         init_precision = np.array(y.sum(axis=0) / y.shape[0]).min()
@@ -70,7 +75,7 @@ class Yala(object):
 
         self.drainer_params.update({
             't_max': t_max, 'p': p, 'q': q, 'weight': (p - init_precision * (p + q)) * self.min_firing, 't': t,
-            'precision': init_precision, 'batch_size': batch_size
+            'precision': init_precision
         })
 
     def __core_parameters(self, l_structures):
@@ -89,18 +94,24 @@ class Yala(object):
             'p': p, 'q': q, 'weight': int((p - init_precision * (p + q)) * self.min_firing) + 1, 'precision': precision
         })
 
-    def fit(self, X, y):
+    def fit(self, X, y, update=False):
 
-        # Create and init imputer
+        # Initialisation
+        if not update:
+            self.firing_graph = None
+
         self.imputer = ArrayImputer(X, y)
         self.imputer.stream_features()
 
-        # Init sampler
+        self.n_inputs, self.n_outputs = X.shape[1], y.shape[1]
+        self.batch_size = min(y.shape[0], self.batch_size)
+
         self.sampler = SupervisedSampler(
-            self.imputer, X.shape[1], y.shape[1], self.sampling_rate, self.n_sampled_vertices,
+            self.imputer, X.shape[1], y.shape[1], self.batch_size, self.sampling_rate, self.n_sampled_vertices,
             firing_graph=self.firing_graph
         )
 
+        # Core loop
         for i in range(self.max_iter):
             print("[YALA]: Iteration {}".format(i))
 
@@ -109,31 +120,34 @@ class Yala(object):
 
             # Initial sampling
             firing_graph = self.sampler.generative_sampling().build_firing_graph(self.drainer_params)
-            stop, n, is_output_flipped = False, 0, False
+            stop, n = False, 0
+            self.imputer.set_backward_flip(False)
 
             # Core loop
             while not stop:
 
                 # Drain firing graph
-                firing_graph = FiringGraphDrainer(firing_graph, self.imputer.set_backward_flip(is_output_flipped))\
+                firing_graph = FiringGraphDrainer(firing_graph, self.imputer, self.batch_size)\
                     .drain_all(t_max=self.drainer_params['t_max'])\
                     .firing_graph
 
                 # Augment firing graph with remaining samples
-                l_structures, l_updates = self.augment_structures(firing_graph, is_output_flipped=is_output_flipped)
+                l_structures, n_updates = self.augment_structures(
+                    firing_graph, X, y, is_output_flipped=self.imputer.backward_flip
+                )
 
                 # Compute stop criteria
-                stop = not any(l_updates)
+                stop = (n_updates == 0)
 
                 if not stop:
 
-                    is_output_flipped = random.random() < self.p_flip
+                    self.imputer.set_backward_flip(random.random() < self.p_flip)
 
                     # update parameters
                     self.__core_parameters(l_structures)
 
                     print("[YALA]: {} structures updated, targeted precision is {}".format(
-                        sum(l_updates), self.drainer_params['precision']
+                        n_updates, self.drainer_params['precision']
                     ))
 
                     # Sample
@@ -156,136 +170,77 @@ class Yala(object):
 
         return self
 
-    def augment_structures(self, firing_graph, is_output_flipped=False):
+    def augment_structures(self, firing_graph, X, y, is_output_flipped=False):
 
-        l_structures, l_updates = [], []
-        for partition in firing_graph.partitions:
-            if partition.get('partitions', None) is None:
-                l_sub_structures, l_sub_updates = self.create_base_structures(partition, firing_graph, is_output_flipped)
-
-            else:
-                l_sub_structures, l_sub_updates = self.update_base_structures(partition, firing_graph, is_output_flipped)
+        l_structures, n_updates = [], 0
+        for i in range(self.n_outputs):
+            l_partition_sub = [partition for partition in firing_graph.partitions if partition['output'] == i]
+            l_sub_structures, n = self.update_structures(l_partition_sub, firing_graph, i, is_output_flipped, X, y)
 
             l_structures.extend(l_sub_structures)
-            l_updates.extend(l_sub_updates)
+            n_updates += n
 
-        return l_structures, l_updates
+        return l_structures, n_updates
 
-    def create_base_structures(self, partition, firing_graph, is_output_flipped):
+    def update_structures(self, l_partitions, firing_graph, ind_out, is_output_flipped, X, y):
 
-        # Get information on structure
-        index_output = (firing_graph.O[partition['indices'], :].sum(axis=0) > 0).nonzero()[1][0]
-        n_inputs, n_outputs = firing_graph.I.shape[0], firing_graph.O.shape[1]
+        l_structures, n, ax_signal = [], 0, np.zeros(X.shape[0], dtype=bool)
+        ax_y = y.toarray()[:, 0].astype(int)
+        for partition in l_partitions:
 
-        # Build structure for each drained vertex of the partition
-        l_selected, l_structures, l_updates = [], [], []
+            # Extract partition
+            firing_graph_sub, l_structure_sub = self.extract_structure(partition, firing_graph), []
 
-        for ind in partition['indices'][:-1]:
-            d_candidate = self.select_best_candidate(
-                firing_graph, ind, l_selected, self.drainer_params, min_firing=self.min_firing
-            )
+            # For each sub partition
+            d_sub_partitions = {sub_part['name']: sub_part for sub_part in firing_graph_sub.partitions}
+            base_structure = self.extract_structure(d_sub_partitions['base'], firing_graph_sub, index_output=ind_out)
 
-            if d_candidate is None:
-                l_updates.append(False)
-                continue
+            for ind in d_sub_partitions['transient']['indices'][:-1]:
+                for d_candidate in self.get_candidates(firing_graph_sub, ind, partition.get('precision', 0)):
 
-            l_structures.append(self.create_base_structure(
-                index_output, d_candidate, n_inputs, n_outputs, is_output_flipped=is_output_flipped
-            ))
-            l_selected.append([d_candidate['index']])
-            l_updates.append(True)
+                    # Update structure
+                    if base_structure is not None:
+                        structure = self.update_base_structure(
+                            ind_out, d_candidate, base_structure, is_output_flipped=is_output_flipped
+                        )
+                    else:
+                        structure = self.create_base_structure(
+                            ind_out, d_candidate, self.n_inputs, self.n_outputs, is_output_flipped=False
+                        )
 
-        return l_structures, l_updates
+                    # test for overlap
+                    ax_structure = structure.propagate(X).toarray()[:, 0] * ax_y
+                    if ax_signal.astype(int).dot(ax_structure) < self.overlap_rate * ax_structure.sum():
+                        ax_signal = (ax_signal + ax_structure) > 0
+                        l_structure_sub.append(structure)
+                        n += 1
+                        break
 
-    def update_base_structures(self, partition, firing_graph, is_output_flipped):
+            if len(l_structure_sub) == 0 and base_structure is not None:
+                l_structure_sub.append(base_structure)
 
-        index_output = (firing_graph.O[partition['indices'], :].sum(axis=0) > 0).nonzero()[1][0]
-        l_structures, base_structure = [], None
+            l_structures.extend(l_structure_sub)
 
-        # Check whether there is a base and transient structure
-        self.check_sub_partitions(partition['partitions'])
+        return l_structures, n
 
-        # Extract both su partition
-        for sub_partition in partition['partitions']:
-            l_keys = list(sub_partition['indices'])
-
-            if sub_partition['name'] == 'base':
-                base_partition = {
-                    'indices': [partition['indices'][k] for k in l_keys],
-                    'depth': sub_partition['depth'],
-                    'precision': partition['precision']
-                }
-                base_structure = self.extract_structure(base_partition, firing_graph, index_output=index_output)
-
-            else:
-                transient_partition = {
-                    'indices': [partition['indices'][k] for k in l_keys],
-                    'depth': sub_partition['depth']
-                }
-
-        # Update base structure with selected transient structure drained bits
-        l_selected, l_updates = [], []
-        for ind in transient_partition['indices']:
-
-            d_candidate = self.select_best_candidate(
-                firing_graph, ind, l_selected, self.drainer_params, min_firing=self.min_firing,
-                precision_treshold=partition['precision'], l_base_indices=base_partition['indices']
-            )
-
-            if d_candidate is None:
-                l_updates.append(False)
-                continue
-
-            l_structures.append(self.update_base_structure(
-                index_output, d_candidate, base_structure, is_output_flipped=is_output_flipped
-            ))
-
-            l_selected.append(base_partition['indices'] + [d_candidate['index']])
-            l_updates.append(True)
-
-        if len(l_structures) == 0:
-            return [base_structure], [False]
-
-        return l_structures, l_updates
-
-    @staticmethod
-    def select_best_candidate(firing_graph, ind, l_selected, drainer_params, min_firing=10, precision_treshold=0,
-                              l_base_indices=None):
+    def get_candidates(self, firing_graph, ind, precision_treshold=0):
 
         # Get quantity of interest
-        sax_mask, sax_scores = firing_graph.Im.tocsc()[:, ind], firing_graph.Iw[:, ind]
-        sax_t = firing_graph.backward_firing['i'].tocsc()[:, ind]
+        sax_scores, sax_t = firing_graph.Iw[:, ind], firing_graph.backward_firing['i'].tocsc()[:, ind]
 
         if sax_scores.nnz > 0:
-            l_candidates = [c for c in (sax_scores > 0).nonzero()[0] if sax_t[c, 0] > min_firing]
-            l_candidates = zip(
-                l_candidates, [sax_scores[c, 0] / sax_t[c, 0] for c in l_candidates],
-                [sax_t[c, 0] for c in l_candidates]
-            )
+            l_indices = [i for i in (sax_scores > 0).nonzero()[0] if sax_t[i, 0] > self.min_firing]
+            l_precisions = [self.get_precision(sax_scores[i, 0], sax_t[i, 0]) for i in l_indices]
 
-            for c, c_score, t in sorted(l_candidates, key=lambda t: t[1], reverse=True):
-                if l_base_indices is not None:
-                    l_indices = l_base_indices.append(c)
-                else:
-                    l_indices = [c]
+            for ind, precision in sorted(zip(l_indices, l_precisions), key=lambda t: t[1], reverse=True):
+                if precision > precision_treshold:
+                    yield {'index': ind, 'precision': precision}
 
-                if l_indices not in l_selected:
-                    precision = float(c_score - drainer_params['weight'])
-                    precision /= (t * (drainer_params['p'] + drainer_params['q']))
-                    precision += float(drainer_params['p']) / (drainer_params['p'] + drainer_params['q'])
-
-                    if precision > precision_treshold:
-                        return {'index': c, 'precision': precision}
-        return
-
-    @staticmethod
-    def check_sub_partitions(d_partitions):
-        try:
-            sub_partition_names = [part.get('name', None) for part in d_partitions]
-            assert('transient' in sub_partition_names and 'base' in sub_partition_names)
-
-        except AssertionError:
-            raise ValueError("Either 'base' or 'transient' part of the firing graph missing")
+    def get_precision(self, score, t):
+        precision = float(score - self.drainer_params['weight'])
+        precision /= (t * (self.drainer_params['p'] + self.drainer_params['q']))
+        precision += float(self.drainer_params['p']) / (self.drainer_params['p'] + self.drainer_params['q'])
+        return precision
 
     @staticmethod
     def set_score_params(phi_old, phi_new, q_max=1000):
@@ -331,6 +286,7 @@ class Yala(object):
 
         # Initialize matrices
         sax_I, sax_C, sax_O = structure.Iw.tolil(), structure.Cw.tolil(), structure.Ow.tolil()
+
         if is_output_flipped:
             sax_I[d_candidate['index'], 1] = 1
 
@@ -352,14 +308,18 @@ class Yala(object):
         )
 
     @staticmethod
-    def extract_structure(partition, firing_graph, index_output=None):
+    def extract_structure(partition, firing_graph, index_output=None, precision=None):
         """
 
         :param partition:
         :param firing_graph:
         :return:
         """
+
         l_ind_partition = partition['indices']
+
+        if len(l_ind_partition) == 0:
+            return None
 
         sax_I = firing_graph.Iw.tocsc()[:, l_ind_partition]
         sax_C = firing_graph.Cw.tocsc()[l_ind_partition, :][:, l_ind_partition]
@@ -371,15 +331,25 @@ class Yala(object):
             'Om': firing_graph.Om.tocsc()[l_ind_partition, :].tocoo()
         }
 
+        d_backward_firing = {
+            'i': firing_graph.backward_firing['i'].tocsc()[:, l_ind_partition],
+            'c': firing_graph.backward_firing['c'].tocsc()[:, l_ind_partition][l_ind_partition, :],
+            'o': firing_graph.backward_firing['o'].tocsc()[l_ind_partition, :],
+        }
+
         if index_output is not None:
             sax_O[4, index_output] = 1
 
         ax_levels = firing_graph.levels[l_ind_partition]
 
-        return FiringGraph.from_matrices(
+        firing_graph_sub = FiringGraph.from_matrices(
             sax_I, sax_C, sax_O.tocsc(), ax_levels, mask_matrices=d_masks, depth=partition['depth'],
-            partitions=partition.get('partitions', None), precision=partition.get('precision', None)
+            partitions=partition.get('partitions', None), precision=partition.get('precision', precision)
         )
+
+        firing_graph_sub.backward_firing = d_backward_firing
+
+        return firing_graph_sub
 
     def predict(self, X):
         ax_probas = self.predict_probas(X)
@@ -389,7 +359,6 @@ class Yala(object):
 
         else:
             ax_preds = ax_probas.argmax(axis=1)
-
         return ax_preds
 
     def predict_probas(self, X):

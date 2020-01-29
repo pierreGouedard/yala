@@ -17,7 +17,7 @@ outputs = {
 }
 
 parameters = {
-    'model': 'xgb'
+    'model': 'yala'
 }
 
 name_submission = '{}.csv'.format(KVName.from_dict(parameters).to_string())
@@ -38,5 +38,6 @@ df_submission = df_test.merge(s_preds, left_index=True, right_index=True)\
 
 df_submission.to_csv(os.path.join(outputs['submission']['path'], name_submission), index=None)
 
-
+import IPython
+IPython.embed()
 
