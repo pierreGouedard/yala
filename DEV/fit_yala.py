@@ -31,8 +31,8 @@ params_folds = {
 }
 
 params_yala = {
-    'sampling_rate': 0.8, 'n_sampled_vertices': 5, 'max_iter': 2, 'learning_rate': 2e-1, 'p_flip': 0,
-    'batch_size': 800, 'min_firing': 15
+    'sampling_rate': 0.8, 'n_sampled_vertices': 5, 'max_iter': 2, 'learning_rate': 2e-1, 'batch_size': 800,
+    'min_firing': 15
 }
 params_yala_grid = {}
 params_encoding = {
