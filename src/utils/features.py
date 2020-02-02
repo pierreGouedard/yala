@@ -19,12 +19,15 @@ class FoldManager(object):
         self.target_name = target_name
 
         # Split data set into a train / test
-        self.df_data, self.df_test = train_test_split(df, test_size=test_size, shuffle=True)
+        self.df_train, self.df_test = train_test_split(df, test_size=test_size, shuffle=True)
 
         # Set method to build feature
         self.params_builder = params_builder
 
         # Set sampling method for Kfold
+        if nb_folds < 2:
+            self.kf = None
+
         if method == 'standard':
             self.kf = KFold(n_splits=nb_folds, shuffle=True)
 
@@ -32,14 +35,14 @@ class FoldManager(object):
             self.kf = StratifiedKFold(n_splits=nb_folds)
 
         else:
-            raise ValueError('Choose method from {}'.format(FoldManager.allowed_methods))
+            raise ValueError('Choose Kfold method from {}'.format(FoldManager.allowed_methods))
 
         self.feature_builder = None
 
     def reset(self):
         self.feature_builder = None
 
-    def get_all_features(self, params_features):
+    def get_train_data(self, params_features, force_recompute=False):
         """
         Build a data set composed of models. The target is also return, if specified.
 
@@ -48,6 +51,9 @@ class FoldManager(object):
         params_features : dict
             kw parameters to build features.
 
+        force_recompute : bool
+            If True, it fit feature builder with train data
+
         Returns
         -------
         tuple
@@ -55,15 +61,15 @@ class FoldManager(object):
 
         """
         # Create models builder if necessary
-        if self.feature_builder is None:
+        if self.feature_builder is None or force_recompute:
             self.feature_builder = FeatureBuilder(**self.params_builder)\
-                .build(self.df_data, params_features)
+                .build(self.df_train, params_features)
 
-        X, y = self.feature_builder.transform(self.df_data, target=True)
+        X, y = self.feature_builder.transform(self.df_train, target=True)
 
         return X, y
 
-    def get_test_features(self, params_features):
+    def get_test_data(self, params_features=None):
         """
         Build test data set composed of models and transformed target.
 
@@ -81,7 +87,7 @@ class FoldManager(object):
         # Create models builder if necessary
         if self.feature_builder is None:
             self.feature_builder = FeatureBuilder(**self.params_builder)\
-                .build(self.df_data, params_features)
+                .build(self.df_train, params_features)
 
         X, y = self.feature_builder.transform(self.df_test, target=True)
 
@@ -120,22 +126,30 @@ class FoldManager(object):
             Composed of dict with Features and target, for train and validation etl.
             i.e: {'X': numpy.ndarray, 'y': numpy.ndarray}
         """
-        # Iterate over different folds
-        for l_train, l_val in self.kf.split(self.df_data):
 
-            # Create models  builder if necessary
-            if self.feature_builder is None:
-                self.feature_builder = FeatureBuilder(**self.params_builder). \
-                    build(self.df_data.loc[self.df_data.index[l_train]], params_features)
+        if self.kf is not None:
+            # Iterate over different folds
+            for l_train, l_val in self.kf.split(self.df_train):
 
-            # Get features
-            X, y = self.feature_builder.transform(self.df_data, target=True)
+                # Create models  builder if necessary
+                self.feature_builder = FeatureBuilder(**self.params_builder)\
+                    .build(self.df_train.loc[self.df_train.index[l_train]], params_features)
 
-            # Build train / validation set
-            X_train, y_train = X[l_train, :], y[l_train]
-            X_val, y_val = X[l_val, :], y[l_val]
+                # Get features
+                X, y = self.feature_builder.transform(self.df_train, target=True)
 
-            yield {'X': X_train, 'y': y_train}, {'X': X_val, 'y': y_val}
+                # Build train / validation set
+                X_train, y_train = X[l_train, :], y[l_train]
+                X_val, y_val = X[l_val, :], y[l_val]
+
+                yield {'X': X_train, 'y': y_train}, {'X': X_val, 'y': y_val}
+
+        else:
+
+            X_train, y_train = self.get_train_data(params_features, force_recompute=True)
+            X_test, y_test = self.get_test_data()
+
+            yield {'X': X_train, 'y': y_train}, {'X': X_test, 'y': y_test}
 
 
 class FeatureBuilder(object):

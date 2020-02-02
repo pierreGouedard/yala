@@ -21,7 +21,8 @@ parameters = {
 
 # Set params for cross validation
 params_folds = {
-    'nb_folds': 4, 'method': 'standard',
+    'nb_folds': 3,
+    'method': 'standard',
     'params_builder': {
         'method': 'cat_encode',
         'cat_cols': ['sex', 'cabin_letter', 'embarked', 'ticket_letter']
@@ -85,8 +86,18 @@ elif parameters['model'] == 'rf':
         params_fold=params_folds,
         scoring='accuracy'
     )
-# Fit and save modeltrain
-cs.fit().save_classifier(os.path.join(outputs['model']['path'], name_mdl))
+
+else:
+    raise ValueError('No valid model name set')
+
+# Select, fit and get trained classifier
+classifier = cs.fit().get_classifier()
+
+# Evaluate on our own test
+confmat_train, confmat_test, d_scores = classifier.evaluate(cs.fold_manager.df_train, cs.fold_manager.df_test)
+
+# Save classifier
+cs.save_classifier(os.path.join(outputs['model']['path'], outputs['model']['name']))
 
 
 

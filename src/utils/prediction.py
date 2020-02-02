@@ -79,7 +79,6 @@ class ClassifierSelector(object):
         self.is_fitted = False
         self.model = None
         self.d_search = None
-        self.backup = path_backup
 
     def fit(self):
         """
@@ -124,11 +123,6 @@ class ClassifierSelector(object):
             # Keep track of best association models builder / model
             if best_score < best_mdl_score:
                 d_search['best_key'] = i
-
-            # Backup search
-            if self.backup is not None:
-                with open(self.backup, 'wb') as handle:
-                    pickle.dump(d_search, handle)
 
         logging.info('Optimal parameters found are {}'.format(d_search[d_search['best_key']]))
 
@@ -195,7 +189,7 @@ class ClassifierSelector(object):
         d_feature_params = self.d_search[self.d_search['best_key']]['params_feature']
         d_model_params = self.d_search[self.d_search['best_key']]['params_mdl']
 
-        X, y = self.fold_manager.get_all_features(d_feature_params)
+        X, y = self.fold_manager.get_train_data(d_feature_params)
 
         # Instantiate model and fit it
         model, args = get_model(self.model_classification, d_model_params)
@@ -206,6 +200,16 @@ class ClassifierSelector(object):
         model.fit(X, y, **args)
 
         return model
+
+    def get_classifier(self):
+
+        # Get best params for feature and model
+        d_param_feature = self.d_search[self.d_search['best_key']]['params_feature']
+        d_param_model = self.d_search[self.d_search['best_key']]['params_mdl']
+
+        return Classifier(
+            self.model, self.fold_manager.feature_builder, d_param_model, d_param_feature
+        )
 
     def save_classifier(self, path):
         """
@@ -220,24 +224,15 @@ class ClassifierSelector(object):
         -------
 
         """
-
-        d_param_feature = self.d_search[self.d_search['best_key']]['params_feature']
-        d_param_model = self.d_search[self.d_search['best_key']]['params_mdl']
-
-        # Instantiate classifier
-        document_classifier = Classifier(
-            self.model, self.fold_manager.feature_builder, d_param_model, d_param_feature
-        )
-
-        # Pickle classifier
+        # Get and pickle classifier
         with open(path, 'wb') as handle:
-            pickle.dump(document_classifier, handle)
+            pickle.dump(self.get_classifier(), handle)
 
         return self
 
     def save_data(self, path, name_train, name_test):
         """
-        Save data used to select and fit the document classifier.
+        Save data used to select and fit the classifier.
 
         Parameters
         ----------
@@ -254,7 +249,7 @@ class ClassifierSelector(object):
         """
 
         path_train, path_test = os.path.join(path, name_train), os.path.join(path, name_test)
-        self.fold_manager.df_data.to_hdf(path_train, key=name_train.split('.')[0], mode='w')
+        self.fold_manager.df_train.to_hdf(path_train, key=name_train.split('.')[0], mode='w')
         self.fold_manager.df_test.to_hdf(path_test, key=name_test.split('.')[0], mode='w')
 
         return self
@@ -262,7 +257,7 @@ class ClassifierSelector(object):
 
 class Classifier(object):
     """
-    The Classifier is an object that ready to use to classify text document.
+    The Classifier is an object that ready to use to classify.
 
     """
 

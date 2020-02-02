@@ -191,18 +191,15 @@ class Yala(object):
 
             l_structures.extend(l_sub_structures)
             n_updates += n
-
         return l_structures, n_updates
 
     def update_structures(self, l_partitions, firing_graph, X, y):
 
         l_structures, n, ax_signal, ax_y = [], 0, np.zeros(X.shape[0], dtype=bool), y.toarray()[:, 0].astype(int)
-
         for partition in l_partitions:
 
             # Init selected structure list
             l_structure_sub = []
-
             # Extract yala sampling structure
             sampled_structure = StructureIntersection.from_partition(partition, firing_graph, add_backward_firing=True)
 
@@ -220,7 +217,7 @@ class Yala(object):
 
                     # Update structure
                     if base_structure is not None:
-                        structure = base_structure.copy().augment_intersection([d_bit['index']], 1, 1, delta_level=1)
+                        structure = base_structure.copy().augment_intersection([d_bit['index']], 1, delta_level=1)
 
                     else:
                         structure = StructureIntersection.from_input_indices(
