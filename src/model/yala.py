@@ -2,7 +2,7 @@
 from firing_graph.core.tools.imputers import ArrayImputer
 from firing_graph.core.solver.sampler import SupervisedSampler
 from firing_graph.core.solver.drainer import FiringGraphDrainer
-from firing_graph.core.data_structure.structures import StructureIntersection
+from firing_graph.core.data_structure.structures import StructureIntersection, StructureYala
 import numpy as np
 
 # Local import
@@ -158,7 +158,6 @@ class Yala(object):
 
     def predict(self, X):
         ax_probas = self.predict_probas(X)
-
         if ax_probas.shape[1] == 1:
             ax_preds = (ax_probas[:, 0] > self.treshold_precision).astype(int)
 
@@ -196,12 +195,14 @@ class Yala(object):
     def update_structures(self, l_partitions, firing_graph, X, y):
 
         l_structures, n, ax_signal, ax_y = [], 0, np.zeros(X.shape[0], dtype=bool), y.toarray()[:, 0].astype(int)
+
         for partition in l_partitions:
 
             # Init selected structure list
             l_structure_sub = []
+
             # Extract yala sampling structure
-            sampled_structure = StructureIntersection.from_partition(partition, firing_graph, add_backward_firing=True)
+            sampled_structure = StructureYala.from_partition(partition, firing_graph, add_backward_firing=True)
 
             # Get sub partition (base and transient)
             d_sub_partitions = {sub_part['name']: sub_part for sub_part in sampled_structure.partitions}
@@ -211,17 +212,17 @@ class Yala(object):
                 d_sub_partitions['base'], sampled_structure, index_output=partition['index_output'],
                 add_backward_firing=True
             )
-
             for ind in d_sub_partitions['transient']['indices']:
                 for d_bit in self.get_scored_bits(sampled_structure, ind, partition.get('precision', 0)):
 
                     # Update structure
                     if base_structure is not None:
                         structure = base_structure.copy().augment_intersection([d_bit['index']], 1, delta_level=1)
+                        structure.precision = d_bit['precision']
 
                     else:
                         structure = StructureIntersection.from_input_indices(
-                            self.n_inputs, self.n_outputs, np.ones(1), partition['index_output'], [[d_bit['index']]], 1,
+                            self.n_inputs, self.n_outputs, 1, partition['index_output'], [[d_bit['index']]], 1,
                             enable_drain=False, **{'precision': d_bit['precision']}
                         )
 

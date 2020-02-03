@@ -1,9 +1,10 @@
 # Global import
 import os
 import pandas as pd
+import json
 
 # Local import
-from settings import models_path, features_path
+from settings import models_path, features_path, export_path
 from src.utils.names import KVName
 from src.utils.prediction import ClassifierSelector
 
@@ -16,18 +17,18 @@ outputs = {
 }
 
 parameters = {
-    'model': 'dt'
+    'model': 'yala2'
 }
 
 # Set params for cross validation
 params_folds = {
-    'nb_folds': 3,
+    'nb_folds': 2,
     'method': 'standard',
     'params_builder': {
         'method': 'cat_num_encode',
         'cat_cols': ['sex', 'cabin_letter', 'embarked', 'ticket_letter'],
         'num_cols': ['pclass', 'age', 'sibsp', 'parch', 'fare', 'cabin_num', 'ticket_num'],
-        'target_tranform': 'sparse_boolean'
+        'target_transform': 'sparse_encoding'
     }
 }
 
@@ -61,5 +62,22 @@ classifier = cs.fit().get_classifier()
 # Evaluate on our own test
 confmat_train, confmat_test, d_scores = classifier.evaluate(cs.fold_manager.df_train, cs.fold_manager.df_test)
 
+import IPython
+IPython.embed()
+name_export = '{}'.format(KVName.from_dict(parameters).to_string())
+
+# Export metrics and predicion
+with open(os.path.join(export_path, 'scores_{}.json'.format(name_export)), 'w') as handle:
+    json.dump(str(d_scores), handle)
+
+cs.fold_manager.df_train\
+    .join(classifier.predict(cs.fold_manager.df_train))\
+    .to_csv(os.path.join(export_path, 'preds_train_{}.csv'.format(name_export)), index=None)
+
+cs.fold_manager.df_test\
+    .join(classifier.predict(cs.fold_manager.df_test))\
+    .to_csv(os.path.join(export_path, 'preds_test_{}.csv'.format(name_export)), index=None)
+
 # Save classifier
 cs.save_classifier(os.path.join(outputs['model']['path'], outputs['model']['name']))
+

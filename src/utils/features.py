@@ -2,6 +2,7 @@
 from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 import numpy as np
 from scipy.sparse import csc_matrix
+from sklearn.preprocessing import LabelEncoder
 
 # Local import
 from src.tools.encoder import HybridEncoder, CatEncoder
@@ -25,10 +26,10 @@ class FoldManager(object):
         self.params_builder = params_builder
 
         # Set sampling method for Kfold
-        if nb_folds < 2:
+        if nb_folds <= 2:
             self.kf = None
 
-        if method == 'standard':
+        elif method == 'standard':
             self.kf = KFold(n_splits=nb_folds, shuffle=True)
 
         elif method == 'stratified':
@@ -148,7 +149,6 @@ class FoldManager(object):
 
             X_train, y_train = self.get_train_data(params_features, force_recompute=True)
             X_test, y_test = self.get_test_data()
-
             yield {'X': X_train, 'y': y_train}, {'X': X_test, 'y': y_test}
 
 
@@ -158,7 +158,7 @@ class FeatureBuilder(object):
     positions. Its transformation pipeline is composed of:
     """
 
-    def __init__(self, method=None, cat_cols=None, num_cols=None, target_name='target', target_tranform=None):
+    def __init__(self, method=None, cat_cols=None, num_cols=None, target_name='target', target_transform=None):
         """
 
         Attributes
@@ -170,7 +170,7 @@ class FeatureBuilder(object):
             Delimiter that is used to seperate token in text input.
         """
         self.method, self.target_name, self.cat_cols, self.num_cols = method, target_name, cat_cols, num_cols
-        self.target_tranform = target_tranform
+        self.target_transform = target_transform
 
         self.model, self.target_encoder, self.is_built = None, None, None
 
@@ -210,8 +210,11 @@ class FeatureBuilder(object):
             else:
                 raise ValueError('Method not implemented: {}'.format(self.method))
 
-            if self.target_tranform == 'sparse_encoding':
-                self.target_encoder = CatEncoder().fit(df_data[[self.target_name]])
+            if self.target_transform == 'encoding':
+                self.target_encoder = LabelEncoder().fit(df_data[self.target_name])
+
+            elif self.target_transform == 'sparse_encoding':
+                self.target_encoder = LabelEncoder().fit(df_data[self.target_name])
 
         self.is_built = True
 
@@ -229,7 +232,12 @@ class FeatureBuilder(object):
 
         target : bool
             Whether to transform target or not.
+    if isinstance(y, spmatrix):
+        if y.shape[1] == 1:
+            y = y.toarray()[:, 0]
 
+        else:
+            y = y.toarray().argmax(axis=1)
         Returns
         -------
         numpy.array
@@ -253,11 +261,16 @@ class FeatureBuilder(object):
             X = df_data[[c for c in df_data.columns if c != self.target_name]].values
 
         if target:
-            if self.target_tranform == 'sparse_encoding':
-                y = self.target_encoder.transform(df_data[[self.target_name]])
+            if self.target_transform == 'encoding':
+                y = self.target_encoder.transform(df_data[self.target_name])
 
-            elif self.target_tranform == 'sparse_boolean':
-                y = csc_matrix(df_data[[self.target_name]].values > 0)
+            elif self.target_transform == 'sparse_encoding':
+                y = self.target_encoder.transform(df_data[self.target_name])
+                if max(y) > 1:
+                    y = csc_matrix(([True] * y.shape[0], (range(y.shape[0]), y)), shape=(y.shape[0], len(np.unique(y))))
+
+                else:
+                    y = csc_matrix(y[:, np.newaxis] > 0)
 
             else:
                 y = df_data.loc[:, self.target_name].values

@@ -348,6 +348,9 @@ class Classifier(object):
         X_train, y_train = self.feature_builder.transform(df_train, target=True)
         X_test, y_test = self.feature_builder.transform(df_test, target=True)
 
+        # Transform target for scoring 1D array of class indices
+        y_train, y_test = transform_label_for_scoring(y_train), transform_label_for_scoring(y_test)
+
         # Instantiate model and fit it
         yhat_train = self.model_classification.predict(X_train)
         yhat_test = self.model_classification.predict(X_test)
@@ -357,8 +360,8 @@ class Classifier(object):
         confmat_test = confusion_matrix(yhat_test, y_test)
 
         # Compute multiple score
-        d_scores = {'train': compute_scores(yhat_train, y_train, self.feature_builder.label_encoder)}
-        d_scores.update({'test': compute_scores(yhat_test, y_test, self.feature_builder.label_encoder)})
+        d_scores = {'train': compute_scores(yhat_train, y_train, self.feature_builder.target_encoder)}
+        d_scores.update({'test': compute_scores(yhat_test, y_test, self.feature_builder.target_encoder)})
 
         return confmat_train, confmat_test, d_scores
 
@@ -394,12 +397,7 @@ def get_model(model_name, model_params):
 
 def get_score(scoring, yhat, y, average='macro', labels=None):
 
-    if isinstance(y, spmatrix):
-        if y.shape[1] == 1:
-            y = y.toarray()[:, 0]
-
-        else:
-            y = y.toarray().argmax(axis=1)
+    y = transform_label_for_scoring(y)
 
     if scoring == 'precision':
         if labels is None and average is not None:
@@ -455,3 +453,15 @@ def compute_scores(yhat, y, label_encoder):
     d_scores['roc_auc'] = {label_encoder.classes_[i]: p for i, p in enumerate(l_rocs)}
 
     return d_scores
+
+
+def transform_label_for_scoring(y):
+
+    if isinstance(y, spmatrix):
+        if y.shape[1] == 1:
+            y = y.toarray()[:, 0].astype(int)
+
+        else:
+            y = y.toarray().argmax(axis=1)
+
+    return y
