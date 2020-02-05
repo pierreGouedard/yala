@@ -2,10 +2,11 @@
 from firing_graph.core.tools.imputers import ArrayImputer
 from firing_graph.core.solver.sampler import SupervisedSampler
 from firing_graph.core.solver.drainer import FiringGraphDrainer
-from firing_graph.core.data_structure.structures import StructureIntersection, StructureYala
 import numpy as np
 
 # Local import
+from .utils import build_firing_graph, augment_multi_output_patterns, set_score_params
+from .patterns import YalaBasePattern, YalaPredictingPattern
 
 
 class Yala(object):
@@ -16,10 +17,14 @@ class Yala(object):
     In addition it implements model specific method of interest.
 
     """
-
-    # TODO: Enable having p, q for each outputs and to store different precision value for each structure,
-    # TODO: Find a strategy to be able to select more than 1 bit at each iteration
-    # TODO: Enable the use of streamer, how does it affect things ?
+    # TODO: Next big release (branch creation):
+    #  * Enable having p, q for each outputs and to store different precision value for each structure
+    #  * Deal with data types of forward and backward in drainer.
+    #  * Deal with format of the matrices of structure (lil_matrix in write mode, csc_matrix in read)
+    #  * Allow custom penalty / reward computation using output imputer + firing_graph already designed
+    #  * Deal with performance issue in various function of src.model.utils.py
+    #  * Find a strategy to be able to select more than 1 bit at each iteration
+    #  * Enable the use of streamer, how does it affect things ?
 
     def __init__(self,
                  sampling_rate=0.8,
@@ -62,24 +67,24 @@ class Yala(object):
         precision = init_precision * (1 + self.learning_rate)
 
         # Get scoring process params
-        p, q = self.set_score_params(init_precision, precision)
+        p, q = set_score_params(init_precision, precision)
 
         self.drainer_params.update({
             't_max': t_max, 'p': p, 'q': q, 'weight': (p - init_precision * (p + q)) * self.min_firing, 't': t,
             'precision': init_precision
         })
 
-    def __core_parameters(self, l_structures):
+    def __core_parameters(self, l_patterns):
 
         # Set core params from signal and current firing graph
-        min_precision = min([structure.precision for structure in l_structures if structure.precision is not None])
+        min_precision = min([structure.precision for structure in l_patterns if structure.precision is not None])
         init_precision = max(min_precision, self.drainer_params['precision'])
         precision = init_precision * (1 + self.learning_rate)
 
         if precision > self.max_precision:
             init_precision, precision = self.max_precision - 5e-2, self.max_precision
 
-        p, q = self.set_score_params(init_precision, precision)
+        p, q = set_score_params(init_precision, precision)
 
         self.drainer_params.update({
             'p': p, 'q': q, 'weight': int((p - init_precision * (p + q)) * self.min_firing) + 1, 'precision': precision
@@ -110,8 +115,8 @@ class Yala(object):
             self.__init_parameters(y)
 
             # Initial sampling
-            firing_graph = self.sampler.generative_sampling().build_firing_graph(self.drainer_params)
-            stop, n = False, 0
+            firing_graph = build_firing_graph(self.sampler.generative_sampling(), self.drainer_params)
+            stop, n, l_patterns = False, 0, []
 
             # Core loop
             while not stop:
@@ -122,37 +127,38 @@ class Yala(object):
                     .firing_graph
 
                 # Augment firing graph with remaining samples
-                l_structures, n_updates = self.augment_structures(firing_graph, X, y)
+                l_patterns, nu = augment_multi_output_patterns(
+                    self.overlap_rate, self.drainer_params, self.min_firing, firing_graph, X, y
+                )
 
                 # Compute stop criteria
-                stop = (n_updates == 0)
+                stop = (nu == 0)
 
                 if not stop:
 
                     # update parameters
-                    self.__core_parameters(l_structures)
+                    self.__core_parameters(l_patterns)
 
-                    print("[YALA]: {} structures updated, targeted precision is {}".format(
-                        n_updates, self.drainer_params['precision']
+                    print("[YALA]: {} pattern updated, targeted precision is {}".format(
+                        nu, self.drainer_params['precision']
                     ))
 
                     # Sample
-                    self.sampler.structures = l_structures
-                    firing_graph = self.sampler.discriminative_sampling().build_firing_graph(self.drainer_params)
+                    self.sampler.base_patterns = l_patterns
+                    firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), self.drainer_params)
 
                     n += 1
 
-                else:
-                    firing_graph = self.sampler.merge_structures(l_structures, drainer_params=None)
-
             # Merge firing graph
-            if n != 0:
-                self.sampler.merge_firing_graph(firing_graph)
+            if self.firing_graph is None:
+                self.firing_graph = YalaPredictingPattern.from_base_patterns(l_base_patterns=l_patterns)
 
-            self.sampler.structures = None
+            else:
+                self.firing_graph.augment(l_patterns)
 
-        # Save partitioned firing graph
-        self.firing_graph = self.sampler.firing_graph
+            # Update sampler attributes
+            self.sampler.firing_graph = self.firing_graph
+            self.sampler.base_patterns = None
 
         return self
 
@@ -170,103 +176,13 @@ class Yala(object):
 
         ax_probas = np.zeros((X.shape[0], self.firing_graph.O.shape[1]))
         for partition in self.firing_graph.partitions:
-            structure = StructureIntersection.from_partition(partition, self.firing_graph)
-            sax_probas = structure.propagate(X).multiply(structure.precision)
+            base_pattern = YalaBasePattern.from_partition(partition, self.firing_graph)
+            sax_probas = base_pattern.propagate(X).multiply(base_pattern.precision)
             for i, j in zip(*sax_probas.nonzero()):
                 if ax_probas[i, j] < sax_probas[i, j]:
-                    ax_probas[i, j] = structure.precision
+                    ax_probas[i, j] = base_pattern.precision
 
         return ax_probas
 
     def score(self, X, y):
         raise NotImplementedError
-
-    def augment_structures(self, firing_graph, X, y):
-
-        l_structures, n_updates = [], 0
-        for i in range(self.n_outputs):
-            l_partition_sub = [partition for partition in firing_graph.partitions if partition['index_output'] == i]
-            l_sub_structures, n = self.update_structures(l_partition_sub, firing_graph, X, y)
-
-            l_structures.extend(l_sub_structures)
-            n_updates += n
-        return l_structures, n_updates
-
-    def update_structures(self, l_partitions, firing_graph, X, y):
-
-        l_structures, n, ax_signal, ax_y = [], 0, np.zeros(X.shape[0], dtype=bool), y.toarray()[:, 0].astype(int)
-
-        for partition in l_partitions:
-
-            # Init selected structure list
-            l_structure_sub = []
-
-            # Extract yala sampling structure
-            sampled_structure = StructureYala.from_partition(partition, firing_graph, add_backward_firing=True)
-
-            # Get sub partition (base and transient)
-            d_sub_partitions = {sub_part['name']: sub_part for sub_part in sampled_structure.partitions}
-
-            # Extract base partition
-            base_structure = StructureIntersection.from_partition(
-                d_sub_partitions['base'], sampled_structure, index_output=partition['index_output'],
-                add_backward_firing=True
-            )
-            for ind in d_sub_partitions['transient']['indices']:
-                for d_bit in self.get_scored_bits(sampled_structure, ind, partition.get('precision', 0)):
-
-                    # Update structure
-                    if base_structure is not None:
-                        structure = base_structure.copy().augment_intersection([d_bit['index']], 1, delta_level=1)
-                        structure.precision = d_bit['precision']
-
-                    else:
-                        structure = StructureIntersection.from_input_indices(
-                            self.n_inputs, self.n_outputs, 1, partition['index_output'], [[d_bit['index']]], 1,
-                            enable_drain=False, **{'precision': d_bit['precision']}
-                        )
-
-                    # Validate overlapping rate
-                    ax_structure = structure.propagate(X).toarray()[:, 0] * ax_y
-                    if ax_signal.astype(int).dot(ax_structure) < self.overlap_rate * ax_structure.sum():
-                        ax_signal = (ax_signal + ax_structure) > 0
-                        l_structure_sub.append(structure)
-                        n += 1
-                        break
-
-            if len(l_structure_sub) == 0 and base_structure is not None:
-                l_structure_sub.append(base_structure)
-
-            l_structures.extend(l_structure_sub)
-
-        return l_structures, n
-
-    def get_scored_bits(self, firing_graph, ind, precision_treshold=0):
-
-        # Get quantity of interest
-        sax_scores, sax_t = firing_graph.Iw[:, ind], firing_graph.backward_firing['i'].tocsc()[:, ind]
-
-        if sax_scores.nnz > 0:
-            l_indices = [i for i in (sax_scores > 0).nonzero()[0] if sax_t[i, 0] > self.min_firing]
-            l_precisions = [self.get_precision(sax_scores[i, 0], sax_t[i, 0]) for i in l_indices]
-
-            for ind, precision in sorted(zip(l_indices, l_precisions), key=lambda t: t[1], reverse=True):
-                if precision > precision_treshold:
-                    yield {'index': ind, 'precision': precision}
-
-    def get_precision(self, score, t):
-        precision = float(score - self.drainer_params['weight'])
-        precision /= (t * (self.drainer_params['p'] + self.drainer_params['q']))
-        precision += float(self.drainer_params['p']) / (self.drainer_params['p'] + self.drainer_params['q'])
-        return precision
-
-    @staticmethod
-    def set_score_params(phi_old, phi_new, q_max=1000):
-
-        for q in range(q_max):
-            p = np.ceil(q * phi_old / (1 - phi_old))
-
-            score = (phi_new * (p + q)) - p
-            if score > 0.:
-                print(p, q)
-                return p, q

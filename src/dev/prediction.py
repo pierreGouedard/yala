@@ -14,8 +14,8 @@ import xgboost
 from scipy.sparse import spmatrix
 
 # Local import
-from src.utils.names import KVName
-from src.utils.features import FoldManager
+from src.dev.names import KVName
+from src.dev.features import FoldManager
 from src.model.yala import Yala
 
 logging.getLogger().setLevel(logging.INFO)

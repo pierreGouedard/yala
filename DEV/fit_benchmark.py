@@ -5,8 +5,8 @@ import json
 
 # Local import
 from settings import models_path, features_path, export_path
-from src.utils.names import KVName
-from src.utils.prediction import ClassifierSelector
+from src.dev.names import KVName
+from src.dev.prediction import ClassifierSelector
 
 # Declare input and outputs
 inputs = {

@@ -4,8 +4,8 @@ import pandas as pd
 
 # Local import
 from settings import models_path, features_path, submission_path
-from src.utils.names import KVName
-from src.utils.prediction import Classifier
+from src.dev.names import KVName
+from src.dev.prediction import Classifier
 
 # Declare input and outputs
 inputs = {
