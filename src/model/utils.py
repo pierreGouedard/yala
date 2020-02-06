@@ -83,7 +83,7 @@ def augment_patterns(X, y, l_partitions, firing_graph, overlap_rate, min_firing,
 
         # Augment patterns with non overlapping best candidate
         for ind, d_bit in l_ind_scores:
-            if ind not in d_ind.get(ind, False):
+            if not d_ind.get(ind, False):
                 continue
 
             # Update pattern
@@ -98,7 +98,7 @@ def augment_patterns(X, y, l_partitions, firing_graph, overlap_rate, min_firing,
 
             # Validate overlapping rate
             ax_pattern, is_overlapping = overlap_test(X, ax_base, ax_y, pattern, overlap_rate)
-            if is_overlapping:
+            if not is_overlapping:
                 ax_base = (ax_base + ax_pattern) > 0
                 l_pattern_sub.append(pattern)
                 _ = d_ind.pop(ind)
@@ -132,7 +132,6 @@ def extract_draining_pattern(partition, firing_graph):
 
 
 def get_transient_scores(transient_pattern, min_firing, drainer_params, precision_treshold):
-
     l_ind_scores = [
         (i, d_score) for i in range(transient_pattern.n_intersection)
         for d_score in get_bit_scores(transient_pattern, i, min_firing, drainer_params, precision_treshold)
@@ -150,7 +149,7 @@ def get_bit_scores(firing_graph, ind, min_firing, drainer_params, precision_tres
     sax_scores, sax_t = firing_graph.Iw[:, ind], firing_graph.backward_firing['i'].tocsc()[:, ind]
 
     if sax_scores.nnz > 0:
-        l_indices = [i for i in (sax_scores > 0).nonzero()[0] if sax_t[i, 0] > min_firing]
+        l_indices = [i for i in (sax_scores > 0).nonzero()[0] if sax_t[i, 0] >= min_firing]
         l_precisions = [get_precision(drainer_params, sax_scores[i, 0], sax_t[i, 0]) for i in l_indices]
 
         for ind, precision in sorted(zip(l_indices, l_precisions), key=lambda t: t[1], reverse=True):
@@ -170,7 +169,7 @@ def overlap_test(X, ax_base, ax_mask, pattern, overlap_rate):
     # compute output of pattern
     ax_pattern = pattern.propagate(X).toarray()[:, 0] * ax_mask
 
-    return ax_base.astype(int).dot(ax_pattern) < overlap_rate * ax_pattern.sum()
+    return ax_base.astype(int).dot(ax_pattern) > overlap_rate * ax_pattern.sum()
 
 
 def set_score_params(phi_old, phi_new, q_max=1000):

@@ -18,13 +18,22 @@ class Yala(object):
 
     """
     # TODO: Next big release (branch creation):
-    #  * Enable having p, q for each outputs and to store different precision value for each structure
-    #  * Deal with data types of forward and backward in drainer.
-    #  * Deal with format of the matrices of structure (lil_matrix in write mode, csc_matrix in read)
-    #  * Allow custom penalty / reward computation using output imputer + firing_graph already designed
-    #  * Deal with performance issue in various function of src.model.utils.py
-    #  * Find a strategy to be able to select more than 1 bit at each iteration
-    #  * Enable the use of streamer, how does it affect things ?
+    #  * P1: Enable having p, q for each outputs and to store different precision value for each structure
+    #  * P1: Deal with data types of forward and backward in drainer.
+    #  * P1: Deal with format of the matrices of structure (lil_matrix in write mode, csc_matrix in read)
+    #  * P1: Allow custom penalty / reward computation using output imputer + firing_graph already designed
+    #  * P1: Enable the use of streamer, how does it affect things ?
+    #  * P2: Deal with performance issue in various function of src.model.utils.py (if any)
+    #  * P2: Change name of fucking imputer everywhere
+
+    # TODO: Next - Next big release (branch creation):
+    #  * Find a strategy to be able to select more than 1 bit at each iteration it can go through a re-design of the
+    #  definition of the level that may not be fixed anymore plus a complete change of yala strat where we go from
+    #  increment a base pattern to directly select remaining transient as predictors (may be quicker), in this case the
+    #  scenario could be: drain -> adapt level -> raise precision -> drain
+    #  adapt level's intuitive rule if min_firing not reached decrease level by one (or by min linked bits),
+    #  otherwise increment if possible stop criteria is not intuitive to derive here, yet the idea is here !
+    #  this scenario is interesting if it is more efficient or less complex than current method
 
     def __init__(self,
                  sampling_rate=0.8,
