@@ -67,6 +67,11 @@ class Yala(object):
         self.imputer, self.sampler, self.drainer = None, None, None
 
     def __init_parameters(self, y):
+        """
+
+        :param y:
+        :return:
+        """
 
         # Set batch sizefrom signal
         t, t_max = y.shape[0], y.shape[0]
@@ -84,6 +89,11 @@ class Yala(object):
         })
 
     def __core_parameters(self, l_patterns):
+        """
+
+        :param l_patterns:
+        :return:
+        """
 
         # Set core params from signal and current firing graph
         min_precision = min([structure.precision for structure in l_patterns if structure.precision is not None])
@@ -100,6 +110,13 @@ class Yala(object):
         })
 
     def fit(self, X, y, update=False):
+        """
+
+        :param X:
+        :param y:
+        :param update:
+        :return:
+        """
 
         # Initialisation
         if not update:
@@ -172,6 +189,11 @@ class Yala(object):
         return self
 
     def predict(self, X):
+        """
+
+        :param X:
+        :return:
+        """
         ax_probas = self.predict_probas(X)
         if ax_probas.shape[1] == 1:
             ax_preds = (ax_probas[:, 0] > self.treshold_precision).astype(int)
@@ -181,12 +203,18 @@ class Yala(object):
         return ax_preds
 
     def predict_probas(self, X):
-        assert self.firing_graph is not None, "First fit firing graph"
+        """
 
+        :param X:
+        :return:
+        """
+        assert self.firing_graph is not None, "First fit firing graph"
         ax_probas = np.zeros((X.shape[0], self.firing_graph.O.shape[1]))
+
         for partition in self.firing_graph.partitions:
             base_pattern = YalaBasePattern.from_partition(partition, self.firing_graph)
             sax_probas = base_pattern.propagate(X).multiply(base_pattern.precision)
+
             for i, j in zip(*sax_probas.nonzero()):
                 if ax_probas[i, j] < sax_probas[i, j]:
                     ax_probas[i, j] = base_pattern.precision

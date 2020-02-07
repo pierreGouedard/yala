@@ -9,6 +9,9 @@ from .patterns import EmptyPattern, YalaBasePattern, YalaTransientPattern, YalaS
 def build_firing_graph(sampler, drainer_params, return_patterns=False):
     """
 
+    :param sampler:
+    :param drainer_params:
+    :param return_patterns:
     :return:
     """
 
@@ -52,7 +55,16 @@ def build_firing_graph(sampler, drainer_params, return_patterns=False):
 
 
 def augment_multi_output_patterns(overlap_rate, drainer_params, min_firing, firing_graph, X, y):
+    """
 
+    :param overlap_rate:
+    :param drainer_params:
+    :param min_firing:
+    :param firing_graph:
+    :param X:
+    :param y:
+    :return:
+    """
     l_patterns, n_updates = [], 0
     for i in range(firing_graph.n_outputs):
         l_partition_sub = [partition for partition in firing_graph.partitions if partition['index_output'] == i]
@@ -67,7 +79,17 @@ def augment_multi_output_patterns(overlap_rate, drainer_params, min_firing, firi
 
 
 def augment_patterns(X, y, l_partitions, firing_graph, overlap_rate, min_firing, drainer_params):
+    """
 
+    :param X:
+    :param y:
+    :param l_partitions:
+    :param firing_graph:
+    :param overlap_rate:
+    :param min_firing:
+    :param drainer_params:
+    :return:
+    """
     l_patterns, n, ax_base, ax_y = [], 0, np.zeros(X.shape[0], dtype=bool), y.toarray()[:, 0].astype(int)
     for partition in l_partitions:
 
@@ -79,7 +101,8 @@ def augment_patterns(X, y, l_partitions, firing_graph, overlap_rate, min_firing,
 
         # Get score for bits of each vertex of transient partition
         d_ind = dict(zip(*[range(transient_pattern.n_intersection), [True] * transient_pattern.n_intersection]))
-        l_ind_scores = get_transient_scores(transient_pattern, min_firing, drainer_params, base_pattern.precision)
+        precision = base_pattern.precision if base_pattern is not None else 0.
+        l_ind_scores = get_transient_scores(transient_pattern, min_firing, drainer_params, precision)
 
         # Augment patterns with non overlapping best candidate
         for ind, d_bit in l_ind_scores:
@@ -102,7 +125,6 @@ def augment_patterns(X, y, l_partitions, firing_graph, overlap_rate, min_firing,
                 ax_base = (ax_base + ax_pattern) > 0
                 l_pattern_sub.append(pattern)
                 _ = d_ind.pop(ind)
-                break
 
         n += len(l_pattern_sub)
 
@@ -115,7 +137,12 @@ def augment_patterns(X, y, l_partitions, firing_graph, overlap_rate, min_firing,
 
 
 def extract_draining_pattern(partition, firing_graph):
+    """
 
+    :param partition:
+    :param firing_graph:
+    :return:
+    """
     drained_pattern = YalaSingleDrainingPattern.from_partition(partition, firing_graph, add_backward_firing=True)
 
     d_partitions = {sub_part['name']: sub_part for sub_part in drained_pattern.partitions}
@@ -125,13 +152,21 @@ def extract_draining_pattern(partition, firing_graph):
     )
 
     transient_pattern = YalaTransientPattern.from_partition(
-        d_partitions['transient'], drained_pattern, index_output=partition['index_output']
+        d_partitions['transient'], drained_pattern, index_output=partition['index_output'], add_backward_firing=True
     )
 
     return drained_pattern, base_pattern, transient_pattern
 
 
 def get_transient_scores(transient_pattern, min_firing, drainer_params, precision_treshold):
+    """
+
+    :param transient_pattern:
+    :param min_firing:
+    :param drainer_params:
+    :param precision_treshold:
+    :return:
+    """
     l_ind_scores = [
         (i, d_score) for i in range(transient_pattern.n_intersection)
         for d_score in get_bit_scores(transient_pattern, i, min_firing, drainer_params, precision_treshold)
@@ -144,7 +179,15 @@ def get_transient_scores(transient_pattern, min_firing, drainer_params, precisio
 
 
 def get_bit_scores(firing_graph, ind, min_firing, drainer_params, precision_treshold=0):
+    """
 
+    :param firing_graph:
+    :param ind:
+    :param min_firing:
+    :param drainer_params:
+    :param precision_treshold:
+    :return:
+    """
     # Get quantity of interest
     sax_scores, sax_t = firing_graph.Iw[:, ind], firing_graph.backward_firing['i'].tocsc()[:, ind]
 
@@ -158,6 +201,13 @@ def get_bit_scores(firing_graph, ind, min_firing, drainer_params, precision_tres
 
 
 def get_precision(drainer_params, score, t):
+    """
+
+    :param drainer_params:
+    :param score:
+    :param t:
+    :return:
+    """
     precision = float(score - drainer_params['weight'])
     precision /= (t * (drainer_params['p'] + drainer_params['q']))
     precision += float(drainer_params['p']) / (drainer_params['p'] + drainer_params['q'])
@@ -165,15 +215,29 @@ def get_precision(drainer_params, score, t):
 
 
 def overlap_test(X, ax_base, ax_mask, pattern, overlap_rate):
+    """
 
+    :param X:
+    :param ax_base:
+    :param ax_mask:
+    :param pattern:
+    :param overlap_rate:
+    :return:
+    """
     # compute output of pattern
     ax_pattern = pattern.propagate(X).toarray()[:, 0] * ax_mask
 
-    return ax_base.astype(int).dot(ax_pattern) > overlap_rate * ax_pattern.sum()
+    return ax_pattern, ax_base.astype(int).dot(ax_pattern) > overlap_rate * ax_pattern.sum()
 
 
 def set_score_params(phi_old, phi_new, q_max=1000):
+    """
 
+    :param phi_old:
+    :param phi_new:
+    :param q_max:
+    :return:
+    """
     for q in range(q_max):
         p = np.ceil(q * phi_old / (1 - phi_old))
 

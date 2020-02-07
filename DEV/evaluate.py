@@ -17,7 +17,7 @@ outputs = {
 }
 
 parameters = {
-    'model': 'xgb'
+    'model': 'yala'
 }
 
 name_submission = '{}.csv'.format(KVName.from_dict(parameters).to_string())

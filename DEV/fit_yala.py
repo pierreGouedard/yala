@@ -33,8 +33,8 @@ params_folds = {
 }
 
 params_yala = {
-    'sampling_rate': 0.8, 'n_sampled_vertices': 5, 'max_iter': 2, 'learning_rate': 2e-1, 'batch_size': 800,
-    'min_firing': 15
+    'sampling_rate': 0.8, 'n_sampled_vertices': 10, 'max_iter': 2, 'learning_rate': 2e-1, 'batch_size': 800,
+    'min_firing': 15, 'treshold_precision': 0.75
 }
 params_yala_grid = {}
 params_encoding = {
@@ -61,9 +61,7 @@ classifier = cs.fit().get_classifier()
 
 # Evaluate on our own test
 confmat_train, confmat_test, d_scores = classifier.evaluate(cs.fold_manager.df_train, cs.fold_manager.df_test)
-
-import IPython
-IPython.embed()
+print(d_scores)
 name_export = '{}'.format(KVName.from_dict(parameters).to_string())
 
 # Export metrics and predicion

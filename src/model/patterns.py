@@ -25,7 +25,7 @@ class EmptyPattern(FiringGraph):
 
 class YalaBasePattern(FiringGraph):
     """
-    This class implement the main data structure used for fiting data. It is composed of weighted link in the form of
+    This class implement the main data structure used for fitting data. It is composed of weighted link in the form of
     scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
     track of the firing of vertices.
 

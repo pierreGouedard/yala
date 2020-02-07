@@ -91,13 +91,13 @@ class TestSelection(unittest.TestCase):
 
         """
         # test overlap case 1
-        do_overlap = overlap_test(
+        _, do_overlap = overlap_test(
             self.sax_input_1, self.ax_base, self.ax_mask, self.test_overlap_pattern, self.overlap_rate
         )
         self.assertTrue(do_overlap)
 
         # test overlap case 2
-        do_overlap = overlap_test(
+        _, do_overlap = overlap_test(
             self.sax_input_2, self.ax_base, self.ax_mask, self.test_overlap_pattern, self.overlap_rate
         )
         self.assertTrue(not do_overlap)

@@ -7,9 +7,7 @@ import numpy as np
 import unittest
 
 # Local import
-from src.model.yala import Yala
-from src.model.patterns import YalaBasePattern, YalaTransientPattern, YalaSingleDrainingPattern, \
-    YalaMutlipleDrainingPattern, YalaPredictingPattern
+from src.model.patterns import YalaBasePattern, YalaTransientPattern, YalaSingleDrainingPattern
 
 
 class TestPattern(unittest.TestCase):
@@ -201,12 +199,20 @@ class TestPattern(unittest.TestCase):
             ax_firing = self.firing_graph.backward_firing['i'][l_inds, i + self.n_rand + 1].toarray()[:, 0]
             self.assertTrue((ax_firing == self.ax_backward_transient[i, :]).all())
 
-    def assertion_draining(self, base_pattern, signal_assert=True, offset=0):
-
-        raise NotImplementedError
-
 
 def create_random_matrices(n_inputs, n_outputs, n_core, depth=2):
+    """
+    Create random matrices and levels, that can correspong to the structure of a firing graph with n_core vertices at
+    layer 1, randomly linked to the input grid of bits. if depth is higher that 2, then then a single vertex is placed
+    at each higher layer until desired depth is reached a the activation of any vertex of layer 1 result in the
+    activation of last layer vertex.
+
+    :param n_inputs: Number of bit of input grid.
+    :param n_outputs: Number of output bit.
+    :param n_core: Number of vertex of layer 1;
+    :param depth: depth of the corresponding firing graph.
+    :return: Sparse matrices of firing grah and an array of levels of its core vertex.
+    """
 
     matrices = create_empty_matrices(n_inputs, n_outputs, n_core + depth - 2)
 
