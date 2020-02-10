@@ -18,13 +18,13 @@ class Yala(object):
 
     """
     # TODO: Next big release (branch creation):
-    #  * P1: Enable having p, q for each outputs and to store different precision value for each structure
+    #  * P2: Enable having p, q for each outputs and to store different precision value for each structure
     #  * P1: Deal with data types of forward and backward in drainer.
     #  * P1: Deal with format of the matrices of structure (lil_matrix in write mode, csc_matrix in read)
     #  * P1: Allow custom penalty / reward computation using output imputer + firing_graph already designed
-    #  * P1: Enable the use of streamer, how does it affect things ?
+    #  * P2: Enable the use of streamer, how does it affect things ?
     #  * P2: Deal with performance issue in various function of src.model.utils.py (if any)
-    #  * P2: Change name of fucking imputer everywhere
+    #  * P*: Change name of fucking imputer everywhere
 
     # TODO: Next - Next big release (branch creation):
     #  * Find a strategy to be able to select more than 1 bit at each iteration it can go through a re-design of the
