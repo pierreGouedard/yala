@@ -22,7 +22,7 @@ def build_firing_graph(sampler, drainer_params, return_patterns=False):
         )
 
     l_patterns = []
-    if sampler.base_patterns is None:
+    if sampler.patterns is None:
         for i in range(sampler.n_outputs):
 
             # Add Empty base and sampled intersection into a yala structure
@@ -34,7 +34,7 @@ def build_firing_graph(sampler, drainer_params, return_patterns=False):
             ))
 
     else:
-        for i, pattern in enumerate(sampler.base_patterns):
+        for i, pattern in enumerate(sampler.patterns):
 
             # Add Empty base and sampled intersection into a yala structure
             l_patterns.append(YalaSingleDrainingPattern.from_patterns(
@@ -189,7 +189,7 @@ def get_bit_scores(firing_graph, ind, min_firing, drainer_params, precision_tres
     :return:
     """
     # Get quantity of interest
-    sax_scores, sax_t = firing_graph.Iw[:, ind], firing_graph.backward_firing['i'].tocsc()[:, ind]
+    sax_scores, sax_t = firing_graph.Iw[:, ind], firing_graph.backward_firing['i'][:, ind]
 
     if sax_scores.nnz > 0:
         l_indices = [i for i in (sax_scores > 0).nonzero()[0] if sax_t[i, 0] >= min_firing]

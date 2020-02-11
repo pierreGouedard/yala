@@ -65,10 +65,12 @@ class TestPattern(unittest.TestCase):
 
         # Initialize firing backward to random int
         self.ax_backward_transient = np.empty_like([], shape=(0, len(self.transient_index[0])))
+        self.firing_graph.backward_firing['i'] = self.firing_graph.backward_firing['i'].tolil()
         for i, l_inds in enumerate(self.transient_index):
             ax_firing = np.random.randint(10, 21, len(l_inds))
             self.firing_graph.backward_firing['i'][l_inds, i + self.n_rand + 1] = ax_firing
             self.ax_backward_transient = np.vstack((self.ax_backward_transient, ax_firing))
+        self.firing_graph.backward_firing['i'] = self.firing_graph.backward_firing['i'].tocsc()
 
     def test_base_pattern(self):
         """
@@ -141,16 +143,16 @@ class TestPattern(unittest.TestCase):
         self.assertTrue((draining_pattern.Ow.toarray() == self.got_matrices['Ow'].toarray()).all())
         self.assertTrue((draining_pattern.levels == self.ax_got_levels).all())
 
-    def test_predicting_pattern(self):
-        """
-        python -m unittest tests.units.test_patterns.TestPattern.test_transient_pattern
-
-        """
-        # Test creation of single draining pattern
-
-        # test creation of a multiple draining pattern
-
-        raise NotImplementedError
+    # def test_predicting_pattern(self):
+    #     """
+    #     python -m unittest tests.units.test_patterns.TestPattern.test_transient_pattern
+    #
+    #     """
+    #     # Test creation of single draining pattern
+    #
+    #     # test creation of a multiple draining pattern
+    #
+    #     raise NotImplementedError
 
     def assertion_base(self, base_pattern, signal_assert=True, offset=0):
 

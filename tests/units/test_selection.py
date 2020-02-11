@@ -29,6 +29,7 @@ class TestSelection(unittest.TestCase):
 
         # Create test transient pattern
         self.matrices = create_empty_matrices(self.n_inputs, self.n_outputs, 6)
+        self.transient_pattern.backward_firing['i'] = self.transient_pattern.backward_firing['i'].tolil()
         for i, l_inds in enumerate(self.transient_index):
             self.transient_pattern.matrices['Iw'][l_inds, i] = self.l_scores[i]
             self.transient_pattern.backward_firing['i'][l_inds, i] = [self.n_firing] * len(l_inds)
@@ -37,6 +38,7 @@ class TestSelection(unittest.TestCase):
         self.transient_pattern.backward_firing['i'][
             self.transient_index[-1], self.transient_pattern.n_intersection - 1
         ] = self.n_firing - 1
+        self.transient_pattern.backward_firing['i'] = self.transient_pattern.backward_firing['i'].tocsc()
 
         # Build expected result
         self.scored_bits = [

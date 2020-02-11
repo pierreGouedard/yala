@@ -57,11 +57,10 @@ class YalaBasePattern(FiringGraph):
         index_output = partition.get('index_output', index_output)
         d_matrices = reduce_matrices(firing_graph.matrices, partition['indices'])
 
-        # Set levels and matrices
+        # Set levels and output link
         ax_levels = firing_graph.levels[partition['indices']]
         d_matrices['Ow'] = d_matrices['Ow'].tolil()
         d_matrices['Ow'][0, index_output] = 1
-        d_matrices['Ow'] = d_matrices['Ow'].tocsc()
 
         # Add kwargs
         kwargs = {
@@ -92,7 +91,7 @@ class YalaBasePattern(FiringGraph):
         # Add inputs to intersection of interest
         self.matrices['Iw'] = self.matrices['Iw'].tolil()
         self.matrices['Iw'][l_indices, 0] = 1
-        self.matrices['Iw'] = self.matrices['Iw'].tocsc()
+        self.matrices['Iw'].tocsc()
 
         # Increase level accordingly
         self.levels += len(l_indices)
@@ -158,7 +157,6 @@ class YalaTransientPattern(FiringGraph):
         ax_levels = firing_graph.levels[partition['indices']]
         d_matrices['Ow'] = d_matrices['Ow'].tolil()
         d_matrices['Ow'][-1, index_output] = 1
-        d_matrices['Ow'] = d_matrices['Ow'].tocsc()
 
         # Add firing graph kwargs
         kwargs = {
@@ -264,13 +262,9 @@ class YalaSingleDrainingPattern(FiringGraph):
             matrices['Cw'][base_pattern.n_intersection - 1, -2], matrices['Cw'][-2, -1] = 1, 1
             matrices['Cw'][base_pattern.n_intersection + transient_pattern.n_intersection, -1] = 1
 
-        # Transform matrices to csc sparse format
-        matrices['Iw'], matrices['Cw'] = matrices['Iw'].tocsc(), matrices['Cw'].tocsc()
-
         # Set output connection
         matrices['Ow'] = lil_matrix((n_core, base_pattern.n_outputs))
         matrices['Ow'][-1, base_pattern.index_output] = 1
-        matrices['Ow'] = matrices['Ow'].tocsc()
 
         # Create partitions
         partitions = [
@@ -357,14 +351,10 @@ class YalaMutlipleDrainingPattern(FiringGraph):
                 l_partitions[-1].update({'precision': pattern.precision})
 
             n_core_current += pattern.Cw.shape[1]
-            d_matrices = augment_matrices(d_matrices, pattern.matrices)
+            d_matrices = augment_matrices(d_matrices, pattern.matrices, write_mode=None)
 
             # Merge levels
             l_levels.extend(list(pattern.levels))
-
-        # Transform matrices to csc sparse format
-        d_matrices['Iw'], d_matrices['Cw'] = d_matrices['Iw'].tocsc(), d_matrices['Cw'].tocsc()
-        d_matrices['Ow'] = d_matrices['Ow'].tocsc()
 
         # Add firing graph kwargs
         kwargs = {
@@ -423,13 +413,9 @@ class YalaPredictingPattern(FiringGraph):
             })
 
             # Augment matrices and levels
-            d_matrices = augment_matrices(d_matrices, pattern.matrices)
+            d_matrices = augment_matrices(d_matrices, pattern.matrices, write_mode=None)
             l_levels.extend(list(pattern.levels))
             n_core += 1
-
-        # Transform matrices to csc sparse format
-        d_matrices['Iw'], d_matrices['Cw'] = d_matrices['Iw'].tocsc(), d_matrices['Cw'].tocsc()
-        d_matrices['Ow'] = d_matrices['Ow'].tocsc()
 
         # Add firing graph kwargs
         kwargs = {'partitions': l_partitions, 'matrices': d_matrices, 'ax_levels': np.array(l_levels)}
@@ -456,7 +442,7 @@ class YalaPredictingPattern(FiringGraph):
             })
 
             # Augment matrices and levels
-            self.matrices = augment_matrices(self.matrices, pattern.matrices)
+            self.matrices = augment_matrices(self.matrices, pattern.matrices, write_mode=False)
             self.levels = np.hstack((self.levels, pattern.levels))
             n_core += 1
 

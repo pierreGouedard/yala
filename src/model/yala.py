@@ -1,5 +1,5 @@
 # Global import
-from firing_graph.core.tools.imputers import ArrayImputer
+from firing_graph.core.tools.helpers.servers import ArrayServer
 from firing_graph.core.solver.sampler import SupervisedSampler
 from firing_graph.core.solver.drainer import FiringGraphDrainer
 import numpy as np
@@ -17,23 +17,14 @@ class Yala(object):
     In addition it implements model specific method of interest.
 
     """
-    # TODO: Next big release (branch creation):
-    #  * P2: Enable having p, q for each outputs and to store different precision value for each structure
+    # TODO:
     #  * P1: Deal with data types of forward and backward in drainer.
     #  * P1: Deal with format of the matrices of structure (lil_matrix in write mode, csc_matrix in read)
-    #  * P1: Allow custom penalty / reward computation using output imputer + firing_graph already designed
+    #  * P1: Enable having p, q for each outputs and to store different precision value for each structure
+    #  * P2: Allow custom penalty / reward computation using output imputer + firing_graph already designed
     #  * P2: Enable the use of streamer, how does it affect things ?
     #  * P2: Deal with performance issue in various function of src.model.utils.py (if any)
-    #  * P*: Change name of fucking imputer everywhere
-
-    # TODO: Next - Next big release (branch creation):
-    #  * Find a strategy to be able to select more than 1 bit at each iteration it can go through a re-design of the
-    #  definition of the level that may not be fixed anymore plus a complete change of yala strat where we go from
-    #  increment a base pattern to directly select remaining transient as predictors (may be quicker), in this case the
-    #  scenario could be: drain -> adapt level -> raise precision -> drain
-    #  adapt level's intuitive rule if min_firing not reached decrease level by one (or by min linked bits),
-    #  otherwise increment if possible stop criteria is not intuitive to derive here, yet the idea is here !
-    #  this scenario is interesting if it is more efficient or less complex than current method
+    #  * P*: Change name of fucking imputer everywhere DONE
 
     def __init__(self,
                  sampling_rate=0.8,
@@ -61,10 +52,10 @@ class Yala(object):
 
         # Core attributes
         self.firing_graph = firing_graph
-        self.drainer_params = {'t': t, 'min_firing': min_firing, 'batch_size': batch_size}
+        self.drainer_params = {'t': -1, 'min_firing': min_firing, 'batch_size': batch_size}
         self.min_firing = min_firing
         self.n_outputs, self.n_inputs = None, None
-        self.imputer, self.sampler, self.drainer = None, None, None
+        self.server, self.sampler, self.drainer = None, None, None
 
     def __init_parameters(self, y):
         """
@@ -74,7 +65,7 @@ class Yala(object):
         """
 
         # Set batch sizefrom signal
-        t, t_max = y.shape[0], y.shape[0]
+        n_max = y.shape[0]
 
         # Set core params from signal and current firing graph
         init_precision = np.array(y.sum(axis=0) / y.shape[0]).min()
@@ -84,7 +75,7 @@ class Yala(object):
         p, q = set_score_params(init_precision, precision)
 
         self.drainer_params.update({
-            't_max': t_max, 'p': p, 'q': q, 'weight': (p - init_precision * (p + q)) * self.min_firing, 't': t,
+            'n_max': n_max, 'p': p, 'q': q, 'weight': (p - init_precision * (p + q)) * self.min_firing,
             'precision': init_precision
         })
 
@@ -122,14 +113,14 @@ class Yala(object):
         if not update:
             self.firing_graph = None
 
-        self.imputer = ArrayImputer(X, y)
-        self.imputer.stream_features()
+        self.server = ArrayServer(X, y)
+        self.server.stream_features()
 
         self.n_inputs, self.n_outputs = X.shape[1], y.shape[1]
         self.batch_size = min(y.shape[0], self.batch_size)
 
         self.sampler = SupervisedSampler(
-            self.imputer, X.shape[1], y.shape[1], self.batch_size, self.sampling_rate, self.n_sampled_vertices,
+            self.server, X.shape[1], y.shape[1], self.batch_size, self.sampling_rate, self.n_sampled_vertices,
             firing_graph=self.firing_graph
         )
 
@@ -148,8 +139,8 @@ class Yala(object):
             while not stop:
 
                 # Drain firing graph
-                firing_graph = FiringGraphDrainer(firing_graph, self.imputer, self.batch_size)\
-                    .drain_all(t_max=self.drainer_params['t_max'])\
+                firing_graph = FiringGraphDrainer(firing_graph, self.server, self.batch_size)\
+                    .drain_all(n_max=self.drainer_params['n_max'])\
                     .firing_graph
 
                 # Augment firing graph with remaining samples
@@ -170,7 +161,7 @@ class Yala(object):
                     ))
 
                     # Sample
-                    self.sampler.base_patterns = l_patterns
+                    self.sampler.patterns = l_patterns
                     firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), self.drainer_params)
 
                     n += 1
@@ -184,7 +175,7 @@ class Yala(object):
 
             # Update sampler attributes
             self.sampler.firing_graph = self.firing_graph
-            self.sampler.base_patterns = None
+            self.sampler.patterns = None
 
         return self
 
