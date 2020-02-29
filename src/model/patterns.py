@@ -324,7 +324,7 @@ class YalaMutlipleDrainingPattern(FiringGraph):
             "Patterns of different depth inputed in YalaMultipleDrainingPattern"
 
     @staticmethod
-    def from_patterns(l_patterns, drainer_params):
+    def from_patterns(l_patterns):
 
         if len(l_patterns) == 0:
             return None
@@ -359,7 +359,6 @@ class YalaMutlipleDrainingPattern(FiringGraph):
         # Add firing graph kwargs
         kwargs = {
             'partitions': l_partitions, 'ax_levels': np.array(l_levels), 'matrices': d_matrices, 'depth': depth,
-            'drainer_params': drainer_params
         }
 
         return YalaMutlipleDrainingPattern(n_in, n_out, **kwargs)

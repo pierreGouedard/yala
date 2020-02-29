@@ -14,15 +14,15 @@ class TestSelection(unittest.TestCase):
     def setUp(self):
 
         self.n_inputs, self.n_outputs, self.index_output, self.n_firing = 10, 1, 0, 100
-        self.transient_index, self.precision_treshold = [[6, 7, 8, 9], [4, 5], [1, 2, 3], [0]], 0.5
+        self.transient_index = [[6, 7, 8, 9], [4, 5], [1, 2, 3], [0]]
         self.depth = 3
 
         self.transient_pattern = YalaTransientPattern.from_input_indices(
             self.n_inputs, self.n_outputs, 1, self.index_output, self.transient_index, 1
         )
 
-        # Set drainer patterns
-        self.drainer_params = {'weight': 10, 'p': 1, 'q': 1}
+        # Set params for selection
+        self.params = {'p': 1, 'r': 1, 'precision': 0.5, 'weight': 10}
 
         # Set scores for test
         self.l_scores = [[30, 40, 70, 80], [50, 60], [1, 1, 1], [90]]
@@ -78,9 +78,7 @@ class TestSelection(unittest.TestCase):
 
         """
         # Test base pattern from indices
-        l_scores = get_transient_scores(
-            self.transient_pattern, self.n_firing, self.drainer_params, precision_treshold=self.precision_treshold
-        )
+        l_scores = get_transient_scores(self.transient_pattern, self.n_firing, **self.params)
 
         # Check results
         for i, t in enumerate(l_scores):
