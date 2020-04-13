@@ -9,6 +9,7 @@ from src.model.patterns import YalaBasePattern, YalaTransientPattern
 from src.model.utils import get_transient_scores, overlap_test
 
 
+# TODO: re-write obsolete
 class TestSelection(unittest.TestCase):
 
     def setUp(self):

@@ -3,9 +3,10 @@ from firing_graph.core.tools.helpers.servers import ArrayServer
 from firing_graph.core.solver.sampler import SupervisedSampler
 from firing_graph.core.solver.drainer import FiringGraphDrainer
 import numpy as np
+import time
 
 # Local import
-from .utils import build_firing_graph, augment_multi_output_patterns, set_score_params
+from .utils import build_firing_graph, disclose_patterns_multi_output, set_score_params
 from .patterns import YalaBasePattern, YalaPredictingPattern
 
 
@@ -18,16 +19,19 @@ class Yala(object):
 
     """
     # TODO:
-    #  * P1: Deal with performance issue in various function of src.model.utils.py (slow)
-    #  * P2: Enable having p, q for each outputs and to store different precision value for each structure
-    #  The above is theoretically working. needs to be tested
+    #  * P1 (CURRENT): make an analysis of performance management on the basis of titanic dataset
+    #  * P2 (DONE): Look and find at least two challenging dataset to apply yala on. it should have
+    #       * At least 1 with more than 1 class to predict
+    #       * At least one with to large number of value to be fit in memory (and thus prevent from using a xgboost)
+    #  * P2 (DONE THEORETICALLY): Enable having p, q for each outputs and to store different precision value for each structure
+    #  The above is theoretically working. [JUST NEEDS TEST]
     #  * P2: Enable the use of server, how does it affect things ?
 
     def __init__(self,
                  sampling_rate=0.8,
                  n_sampled_vertices=10,
                  max_iter=5,
-                 max_retry=2,
+                 max_retry=5,
                  learning_rate=5e-2,
                  batch_size=1000,
                  firing_graph=None,
@@ -129,7 +133,7 @@ class Yala(object):
 
             # Initial sampling
             firing_graph = build_firing_graph(self.sampler.generative_sampling(), ax_weights)
-            stop, n, l_patterns = False, 0, []
+            stop, n, l_patterns_selected = False, 0, []
 
             # Core loop
             while not stop:
@@ -139,40 +143,47 @@ class Yala(object):
                     .drain_all(n_max=y.shape[0])\
                     .firing_graph
 
-                # Augment firing graph with remaining samples
-                l_patterns, nu = augment_multi_output_patterns(
-                    X, y, firing_graph, self.drainer_params, ax_weights, self.min_firing, self.overlap_rate
+                # Disclose new patterns
+                self.sampler.patterns, l_patterns_selected_ = disclose_patterns_multi_output(
+                    X, firing_graph, self.drainer_params, ax_weights, ax_precision, self.min_firing,
+                    self.overlap_rate, self.treshold_precision
                 )
 
                 # Compute stop criteria
-                stop = (nu == 0)
+                l_patterns_selected.extend(l_patterns_selected_)
+                stop = (len(self.sampler.patterns) == 0)
 
                 if not stop:
 
                     # update parameters
-                    ax_precision, ax_weights = self.__core_parameters(l_patterns, ax_precision)
-                    print("[YALA]: {} pattern updated, targeted precision are {}".format(nu, ax_precision))
+                    ax_precision, ax_weights = self.__core_parameters(self.sampler.patterns, ax_precision)
+                    print("[YALA]: {} pattern updated, targeted precision are {}".format(
+                        len(self.sampler.patterns), ax_precision)
+                    )
 
                     # Sample
-                    self.sampler.patterns = l_patterns
                     firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), ax_weights)
 
                     n += 1
 
-            # Escape main loop on lax retry condition
-            if len(l_patterns) == 0:
+            # Escape main loop on last retry condition
+            if len(l_patterns_selected) == 0:
                 n_no_update += 1
                 if n_no_update >= self.max_retry:
                     break
             else:
                 n_no_update = 0
 
+            # TODO:
+            #  what happened when we go through only 1 iteration ?
+            #  what happened when we go througn 20 iterations ?
+            #  Plot performance with respect to time
             # Merge firing graph
             if self.firing_graph is None:
-                self.firing_graph = YalaPredictingPattern.from_base_patterns(l_base_patterns=l_patterns)
+                self.firing_graph = YalaPredictingPattern.from_base_patterns(l_base_patterns=l_patterns_selected)
 
             else:
-                self.firing_graph.augment(l_patterns)
+                self.firing_graph.augment(l_patterns_selected)
 
             # Update sampler attributes
             self.server.pattern_backward = self.firing_graph
@@ -187,6 +198,8 @@ class Yala(object):
         :return:
         """
         ax_probas = self.predict_probas(X)
+        #import IPython
+        #IPython.embed()
         if ax_probas.shape[1] == 1:
             ax_preds = (ax_probas[:, 0] > self.treshold_precision).astype(int)
 

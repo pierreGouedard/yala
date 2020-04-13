@@ -101,6 +101,8 @@ class ClassifierSelector(object):
         associated.
 
         """
+        if len(self.params_features_grid) * len(self.params_mdl_grid) <= 1:
+            return {0: {"params_feature": self.params_features, "params_mdl": self.params_mdl}, 'best_key': 0}
 
         d_search, best_score = {}, 0.
         for i, cross_values in enumerate(itertools.product(*self.params_features_grid.values())):
@@ -142,7 +144,6 @@ class ClassifierSelector(object):
         tuple
             A tuple containing a dictionary of parameters of the best model and the score of the best model
         """
-
         best_mdl_params, best_mdl_score = None, 0.
         for cross_values in itertools.product(*self.params_mdl_grid.values()):
 

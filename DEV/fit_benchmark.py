@@ -17,7 +17,7 @@ outputs = {
 }
 
 parameters = {
-    'model': 'xgb'
+    'model': 'dt'
 }
 
 # Set params for cross validation

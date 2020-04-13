@@ -1,6 +1,6 @@
 # Global imports
 import numpy as np
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, csc_matrix
 
 # Local import
 from firing_graph.core.data_structure.graph import FiringGraph
@@ -85,6 +85,24 @@ class YalaBasePattern(FiringGraph):
         kwargs.update({'ax_levels': ax_levels, 'matrices': d_matrices})
 
         return YalaBasePattern(n_inputs, n_outputs, index_output, **kwargs)
+
+    def update_outputs(self, index_output, n_outputs=None):
+
+        # Get new n_outputs if specified
+        self.n_outputs = n_outputs if n_outputs is not None else self.n_outputs
+
+        # Change Output matrices
+        self.matrices['Ow'] = lil_matrix((1, self.n_outputs))
+        self.matrices['Ow'][0, index_output] = 1
+        sax_Om = lil_matrix((1, self.n_outputs))
+        sax_Om[0, index_output] = self.matrices['Om'][0, self.index_output]
+        self.matrices['Om'] = sax_Om
+
+
+        # Change index output
+        self.index_output = index_output
+
+        return self
 
     def augment(self, l_indices, precision=None):
 
@@ -247,7 +265,6 @@ class YalaSingleDrainingPattern(FiringGraph):
 
     @staticmethod
     def from_patterns(base_pattern, transient_pattern):
-
         depth, n_core = 3, base_pattern.n_intersection + transient_pattern.n_core
         matrices = augment_matrices(base_pattern.matrices, transient_pattern.matrices)
         ax_levels = np.hstack((base_pattern.levels, transient_pattern.levels))
@@ -375,7 +392,7 @@ class YalaPredictingPattern(FiringGraph):
     def __init__(self, n_inputs, n_outputs, **kwargs):
 
         self.n_inputs, self.n_outputs = n_inputs, n_outputs
-        kwargs.update({'project': 'YalaDrainingPattern', 'depth': 2})
+        kwargs.update({'project': 'YalaPredictingPattern', 'depth': 2})
 
         # Invoke parent constructor
         super(YalaPredictingPattern, self).__init__(**kwargs)
@@ -383,7 +400,7 @@ class YalaPredictingPattern(FiringGraph):
     @staticmethod
     def check_patterns(l_patterns):
         assert all([isinstance(o, YalaBasePattern) for o in l_patterns]),\
-            "Only YalaPredictingPattern can be used to build YalaBasePattern"
+            "Only YalaBasePattern can be used to build YalaPredictingPattern"
 
         assert len(set([o.depth for o in l_patterns])) == 1, \
             "Patterns of different depth inputed in YalaPredictingPattern"
