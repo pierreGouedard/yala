@@ -3,11 +3,11 @@ import numpy as np
 from scipy.sparse import csc_matrix, diags, lil_matrix, tril
 
 # Local import
-from .patterns import EmptyPattern, YalaBasePattern, YalaTransientPattern, YalaSingleDrainingPattern, \
-    YalaMutlipleDrainingPattern, YalaPredictingPattern
+from .patterns import EmptyPattern, YalaBasePattern, YalaPredPattern, YalaDrainingPattern, \
+    YalaDrainingPatterns, YalaPredPatterns
 
 
-def build_firing_graph(sampler, ax_weights):
+def build_firing_graph(sampler, ax_weights, level=1):
     """
 
     :param sampler:
@@ -15,7 +15,7 @@ def build_firing_graph(sampler, ax_weights):
     :return:
     """
 
-    if sampler.vertices is None:
+    if sampler.samples is None:
         raise ValueError(
             "Before Building firing graph, one need to sample input bits using generative or discriminative "
             "sampling"
@@ -25,31 +25,31 @@ def build_firing_graph(sampler, ax_weights):
     if sampler.patterns is None:
         for i in range(sampler.n_outputs):
             # Add Empty base and sampled intersection into a yala structure
-            l_patterns.append(YalaSingleDrainingPattern.from_patterns(
+            l_patterns.append(YalaDrainingPattern.from_patterns(
                 EmptyPattern(sampler.n_inputs, sampler.n_outputs, i),
-                YalaTransientPattern.from_input_indices(
-                    sampler.n_inputs, sampler.n_outputs, sampler.l0, i, sampler.vertices[i], ax_weights[i]
+                YalaBasePattern.from_input_indices(
+                    sampler.n_inputs, sampler.n_outputs, i, sampler.samples[i], level, ax_weights[i]
                 )
             ))
 
     else:
         for i, pattern in enumerate(sampler.patterns):
             # Add Empty base and sampled intersection into a yala structure
-            l_patterns.append(YalaSingleDrainingPattern.from_patterns(
+            l_patterns.append(YalaDrainingPattern.from_patterns(
                 pattern,
-                YalaTransientPattern.from_input_indices(
-                    sampler.n_inputs, sampler.n_outputs, sampler.l0, pattern.index_output, sampler.vertices[i],
+                YalaBasePattern.from_input_indices(
+                    sampler.n_inputs, sampler.n_outputs, pattern.index_output, sampler.samples[i], level,
                     ax_weights[pattern.index_output]
                 )
             ))
 
     # Replace by YalaDrainingPatterns.from_patterns
-    firing_graph = YalaMutlipleDrainingPattern.from_patterns(l_patterns)
+    firing_graph = YalaDrainingPatterns.from_patterns(l_patterns)
 
     return firing_graph
 
 
-def get_normalized_precision(sax_activations, ax_precision, ax_new_mask, overlap_rate=0.):
+def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
 
     # If no candidate for norm return empty list
     if not ax_new_mask.any():
@@ -67,10 +67,6 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask, overlap
     sax_activations_sub = sax_activations.dot(diags(ax_new_mask, dtype=bool))
     sax_activation_cs = csc_matrix(sax_activations.toarray().cumsum(axis=1))
     sax_dist = sax_activations_sub.astype(int).transpose().dot(sax_activation_cs > 0).dot(sax_diff)
-
-    if overlap_rate > 0:
-        sax_temp = (tril(sax_dist, k=-1) * (1 - overlap_rate)).floor()
-        sax_dist = sax_dist - sax_temp + diags(np.squeeze(np.asarray(sax_temp.sum(axis=1))))
 
     # Compute standardized precision
     ax_p = sax_dist[ax_new_mask, :].toarray().sum(axis=1) * ax_precision[ax_new_mask]
@@ -134,7 +130,7 @@ def disclose_patterns(sax_X, l_partitions, firing_graph, overlap_rate, min_firin
         return [], []
 
     # Gather every candidate pattern and compute their activation
-    sax_activations_all = YalaPredictingPattern.from_base_patterns([d['pattern'] for d in l_scores]) \
+    sax_activations_all = YalaPredPatterns.from_pred_patterns([d['pattern'] for d in l_scores]) \
         .propagate(sax_X)
     sax_activations_all = sax_activations_all[:, range(max(sax_activations_all.nonzero()[1]) + 1)]
     print('time get score and propagate {} seconds for {} candidates'.format(time.time() - t0, len(l_scores)))
@@ -185,19 +181,17 @@ def get_scores_multi_partition(l_partitions, firing_graph, min_firing, **kwargs)
     :return:
     """
     n, l_scores = 0, []
-    for i, partition in enumerate(l_partitions):
-
+    for partition in l_partitions:
         # Extract Yala Single draining pattern and base pattern
-        base_pattern, transient_pattern = extract_draining_pattern(partition, firing_graph)
+        pred_pattern, transient_pattern = extract_draining_pattern(partition, firing_graph)
 
         # Update kwargs for score computation
-        if base_pattern is not None:
-            kwargs.update({'precision': max(kwargs['precision'], base_pattern.precision)})
+        if pred_pattern is not None:
+            kwargs.update({'precision': max(kwargs['precision'], pred_pattern.precision)})
 
-        for j in range(transient_pattern.n_intersection):
-            l_scores_sub = list(get_scores(transient_pattern, base_pattern, j, i, min_firing, **kwargs))
-            kwargs.update({'n': kwargs.get('n', 0) + len(l_scores_sub)})
-            l_scores.extend(l_scores_sub)
+        l_scores_sub = list(get_scores(transient_pattern, pred_pattern, min_firing, **kwargs))
+        kwargs.update({'n': kwargs.get('n', 0) + len(l_scores_sub)})
+        l_scores.extend(l_scores_sub)
 
     return l_scores
 
@@ -209,22 +203,22 @@ def extract_draining_pattern(partition, firing_graph):
     :param firing_graph:
     :return:
     """
-    drained_pattern = YalaSingleDrainingPattern.from_partition(partition, firing_graph, add_backward_firing=True)
 
+    drained_pattern = YalaDrainingPattern.from_partition(partition, firing_graph, add_backward_firing=True)
     d_partitions = {sub_part['name']: sub_part for sub_part in drained_pattern.partitions}
 
-    base_pattern = YalaBasePattern.from_partition(
-        d_partitions['base'], drained_pattern, index_output=partition['index_output']
+    pred_pattern = YalaPredPattern.from_partition(
+        d_partitions['pred'], drained_pattern, index_output=partition['index_output']
     )
 
-    transient_pattern = YalaTransientPattern.from_partition(
+    transient_pattern = YalaBasePattern.from_partition(
         d_partitions['transient'], drained_pattern, index_output=partition['index_output'], add_backward_firing=True
     )
 
-    return base_pattern, transient_pattern
+    return pred_pattern, transient_pattern
 
 
-def get_scores(transient_pattern, base_pattern, ind, base_id, min_firing, **kwargs):
+def get_scores(transient_pattern, pred_pattern, min_firing, **kwargs):
     """
 
     :param transient_pattern:
@@ -235,11 +229,11 @@ def get_scores(transient_pattern, base_pattern, ind, base_id, min_firing, **kwar
     """
     # Get quantity of interest
     pattern_args = {'n_patterns': kwargs['max_patterns']}
-    if base_pattern is None:
+    if pred_pattern is None:
         pattern_args.update({'n_inputs': transient_pattern.n_inputs})
 
     #
-    sax_scores, sax_t = transient_pattern.Iw[:, ind], transient_pattern.backward_firing['i'][:, ind]
+    sax_scores, sax_t = transient_pattern.Iw[:, 0], transient_pattern.backward_firing['i'][:, 0]
     n = kwargs.get('n', 0)
 
     # For each valid candidate yield the pattern and the precision
@@ -256,27 +250,26 @@ def get_scores(transient_pattern, base_pattern, ind, base_id, min_firing, **kwar
             if int(precision * 100) > int(kwargs['precision'] * 100):
                 yield {
                     'is_base': False,
-                    'pattern': build_pattern(ind, base_pattern, precision, n, **pattern_args),
+                    'pattern': build_pattern(ind, pred_pattern, precision, n, **pattern_args),
                     'precision': precision,
-                    'base_id': base_id
                 }
                 n += 1
 
     # Yield the base pattern with its precision
-    if base_pattern is not None:
-        pattern = base_pattern.copy().update_outputs(n, pattern_args['n_patterns'])
-        yield {'is_base': True, 'pattern': pattern, 'precision': pattern.precision, 'base_id': base_id}
+    if pred_pattern is not None:
+        pattern = pred_pattern.copy().update_outputs(n, pattern_args['n_patterns'])
+        yield {'is_base': True, 'pattern': pattern, 'precision': pattern.precision}
 
 
-def build_pattern(index, base_pattern, precision, index_output, n_patterns, n_inputs=None):
+def build_pattern(index, pred_pattern, precision, index_output, n_patterns, n_inputs=None):
     # Update pattern
-    if base_pattern is not None:
-        pattern = base_pattern.copy()\
+    if pred_pattern is not None:
+        pattern = pred_pattern.copy()\
             .update_outputs(index_output, n_patterns)\
             .augment([index], precision=precision)
 
     else:
-        pattern = YalaBasePattern.from_input_indices(
+        pattern = YalaPredPattern.from_input_indices(
             n_inputs, n_patterns, index_output, [index], **{'precision': precision}
         )
 

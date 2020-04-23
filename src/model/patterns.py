@@ -1,6 +1,6 @@
 # Global imports
 import numpy as np
-from scipy.sparse import lil_matrix, csc_matrix
+from scipy.sparse import lil_matrix
 
 # Local import
 from firing_graph.core.data_structure.graph import FiringGraph
@@ -12,11 +12,11 @@ class EmptyPattern(FiringGraph):
 
     def __init__(self, n_inputs, n_outputs, index_output, **kwargs):
 
-        self.n_inputs, self.n_outputs, self.n_intersection, self.index_output = n_inputs, n_outputs, 0, index_output
+        self.n_inputs, self.n_outputs, self.size, self.index_output = n_inputs, n_outputs, 0, index_output
 
         kwargs.update({
-            'project': 'EmptyPattern', 'ax_levels': np.array([]), 'depth': 1,
-            'matrices': create_empty_matrices(n_inputs, n_outputs, self.n_intersection)
+            'project': 'EmptyPattern', 'ax_levels': np.array([]), 'depth': 0,
+            'matrices': create_empty_matrices(n_inputs, n_outputs, self.size)
         })
 
         # Invoke parent constructor
@@ -32,7 +32,7 @@ class YalaBasePattern(FiringGraph):
     """
     def __init__(self, n_inputs, n_outputs, index_output, **kwargs):
 
-        self.n_inputs, self.n_outputs, self.index_output, self.n_intersection = n_inputs, n_outputs, index_output, 1
+        self.n_inputs, self.n_outputs, self.index_output, self.size = n_inputs, n_outputs, index_output, 1
         kwargs.update({'project': 'YalaBasePattern', 'depth': 2})
 
         # Invoke parent constructor
@@ -47,7 +47,7 @@ class YalaBasePattern(FiringGraph):
         )
 
     @staticmethod
-    def from_partition(partition, firing_graph, index_output=None):
+    def from_partition(partition, firing_graph, index_output=None, add_backward_firing=False):
 
         # In case of empty partition, stop
         if len(partition['indices']) == 0:
@@ -68,18 +68,27 @@ class YalaBasePattern(FiringGraph):
             'ax_levels': ax_levels, 'matrices': d_matrices
         }
 
+        if add_backward_firing:
+            kwargs.update(
+                {'backward_firing': reduce_backward_firing(firing_graph.backward_firing, partition['indices'])}
+            )
+
         return YalaBasePattern(firing_graph.I.shape[0], firing_graph.O.shape[1], index_output, **kwargs)
 
     @staticmethod
-    def from_input_indices(n_inputs, n_outputs, index_output, l_inputs, **kwargs):
+    def from_input_indices(n_inputs, n_outputs, index_output, l_inputs, l0, weight, enable_drain=True, **kwargs):
 
         # Initialize Matrices
         d_matrices = create_empty_matrices(n_inputs, n_outputs, 1)
 
         # Set level and matrices
-        ax_levels = np.array([len(l_inputs)])
-        d_matrices['Iw'][l_inputs, 0] = 1
+        ax_levels = np.array([l0])
+        d_matrices['Iw'][l_inputs, 0] = weight
         d_matrices['Ow'][0, index_output] = 1
+
+        # Update mask if necessary
+        if enable_drain:
+            d_matrices.update({'Im': d_matrices['Iw'] > 0})
 
         # Add firing graph kwargs
         kwargs.update({'ax_levels': ax_levels, 'matrices': d_matrices})
@@ -94,17 +103,18 @@ class YalaBasePattern(FiringGraph):
         # Change Output matrices
         self.matrices['Ow'] = lil_matrix((1, self.n_outputs))
         self.matrices['Ow'][0, index_output] = 1
+
+        # Change output mask
         sax_Om = lil_matrix((1, self.n_outputs))
         sax_Om[0, index_output] = self.matrices['Om'][0, self.index_output]
         self.matrices['Om'] = sax_Om
-
 
         # Change index output
         self.index_output = index_output
 
         return self
 
-    def augment(self, l_indices, precision=None):
+    def augment(self, l_indices, level_increment=0, precision=None):
 
         # Add inputs to intersection of interest
         self.matrices['Iw'] = self.matrices['Iw'].tolil()
@@ -112,12 +122,17 @@ class YalaBasePattern(FiringGraph):
         self.matrices['Iw'].tocsc()
 
         # Increase level accordingly
-        self.levels += len(l_indices)
+        self.levels += level_increment
 
         if precision is not None:
             self.precision = precision
 
         return self
+
+    def to_dict(self):
+        d_graph = super(YalaBasePattern, self).to_dict(deep_copy=True)
+        d_struct = {'n_inputs': self.n_inputs, 'n_outputs': self.n_outputs, 'index_output': self.index_output}
+        return d_struct, d_graph
 
     def copy(self):
 
@@ -131,123 +146,53 @@ class YalaBasePattern(FiringGraph):
         return self.from_dict(d_struct, **{k: v for k, v in d_graph.items()})
 
 
-class YalaTransientPattern(FiringGraph):
+class YalaPredPattern(YalaBasePattern):
     """
-    This class implement the main data structure used for fiting data. It is composed of weighted link in the form of
+    This class implement the main data structure used for fitting data. It is composed of weighted link in the form of
     scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
     track of the firing of vertices.
 
     """
-    def __init__(self, n_intersection, n_inputs, n_outputs, index_output, **kwargs):
-
-        self.n_inputs, self.n_outputs, self.n_intersection = n_inputs, n_outputs, n_intersection
-        self.index_output = index_output
-
-        kwargs.update({'project': 'YalaTransientPattern', 'depth': 2 + int(self.n_intersection > 1)})
-
-        # Invoke parent constructor
-        super(YalaTransientPattern, self).__init__(**kwargs)
-
-    @property
-    def n_core(self):
-        return self.n_intersection + int(self.n_intersection > 1)
 
     @staticmethod
     def from_dict(d_struct, **graph_kwargs):
 
-        return YalaTransientPattern(
-            n_intersection=d_struct['n_intersection'], n_inputs=d_struct['n_inputs'], n_outputs=d_struct['n_outputs'],
-            index_output=d_struct['index_output'], **graph_kwargs
+        return YalaPredPattern(
+            n_inputs=d_struct['n_inputs'], n_outputs=d_struct['n_outputs'], index_output=d_struct['index_output'],
+            **graph_kwargs
         )
 
     @staticmethod
     def from_partition(partition, firing_graph, index_output=None, add_backward_firing=False):
 
-        # In case of empty partition, stop
-        if len(partition['indices']) == 0:
+        if not len(partition['indices']):
             return None
 
-        # Set number of intersection (remove top vertex in case of multiple intersection)
-        n_inter = len(partition['indices']) - int(len(partition['indices']) > 1)
+        # Ensure that the number of incoming edge is equal to the level
+        l0 = firing_graph.levels[partition['indices']][0]
+        n_bit = len(firing_graph.matrices['Iw'][:, partition['indices']].nonzero()[0])
+        assert l0 == n_bit, "For YalaPredPattern the level should be equal to the cardinality of incoming edges"
 
-        # Set levels and latrices
-        d_matrices = reduce_matrices(firing_graph.matrices, partition['indices'])
-        ax_levels = firing_graph.levels[partition['indices']]
-        d_matrices['Ow'] = d_matrices['Ow'].tolil()
-        d_matrices['Ow'][-1, index_output] = 1
+        d_struct, d_graph = YalaBasePattern.from_partition(
+            partition, firing_graph, index_output=index_output, add_backward_firing=add_backward_firing
+        ).to_dict()
 
-        # Add firing graph kwargs
-        kwargs = {
-            'partitions': partition.get('partitions', None), 'precision': partition.get('precision', None),
-            'matrices': d_matrices, 'ax_levels': ax_levels
-        }
-        if add_backward_firing:
-            kwargs.update(
-                {'backward_firing': reduce_backward_firing(firing_graph.backward_firing, partition['indices'])}
-            )
-
-        return YalaTransientPattern(
-            n_inter, firing_graph.I.shape[0], firing_graph.O.shape[1], partition.get('index_output', index_output),
-            **kwargs
-        )
+        return YalaPredPattern.from_dict(d_struct, **d_graph)
 
     @staticmethod
-    def from_input_indices(n_inputs, n_outputs, l0, index_output, l_inputs, weight, enable_drain=True, **kwargs):
+    def from_input_indices(n_inputs, n_outputs, index_output, l_inputs, **kwargs):
 
-        # Set levels
-        n_intersection = len(l_inputs)
-        ax_levels = np.array([l0] * n_intersection)
+        d_struct, d_graph = YalaBasePattern.from_input_indices(
+            n_inputs, n_outputs, index_output, l_inputs, len(set(l_inputs)), 1, enable_drain=False, **kwargs
+        ).to_dict()
 
-        if n_intersection > 1:
-            ax_levels = np.hstack((ax_levels, np.array([1])))
+        return YalaPredPattern.from_dict(d_struct, **d_graph)
 
-        # Set Matrices
-        d_matrices = create_empty_matrices(n_inputs, n_outputs, n_intersection + int(n_intersection > 1))
-        for i, l_bits in enumerate(l_inputs):
-            d_matrices['Iw'][list(l_bits), i] = weight
-
-        for i in range(n_intersection - int(n_intersection == 1)):
-            d_matrices['Cw'][i, n_intersection] = 1
-
-        d_matrices['Ow'][n_intersection - int(n_intersection == 1), index_output] = 1
-
-        # Update mask if necessary
-        if enable_drain:
-            d_matrices.update({'Im': d_matrices['Iw'] > 0})
-
-        # Add firing graph kwargs
-        kwargs.update({'ax_levels': ax_levels, 'matrices': d_matrices})
-
-        return YalaTransientPattern(n_intersection, n_inputs, n_outputs, index_output, **kwargs)
-
-    def copy(self):
-
-        d_graph = super(YalaTransientPattern, self).to_dict(deep_copy=True)
-        d_struct = {
-            'n_inputs': self.n_inputs,
-            'n_outputs': self.n_outputs,
-            'n_intersection': self.n_intersection,
-            'index_output': self.index_output,
-        }
-        return self.from_dict(d_struct, **{k: v for k, v in d_graph.items()})
+    def augment(self, l_indices, level_increment=0, precision=None):
+        return super(YalaPredPattern, self).augment(l_indices, level_increment=len(set(l_indices)), precision=precision)
 
 
-class YalaAntiSymmetricBase(FiringGraph):
-    """
-    To do if needed: allow anti symmetric non activation.
-
-    \/  \/
-    O   O       levels = [l, l'] 
-    | \/
-    O O         levels = [1, 1]
-    \/
-    O           levels = [2]
-
-    When left vertex of layer 1 activate alone then vertex of the last layer activate, otherwise it doesn't activate.
-    """
-
-
-class YalaSingleDrainingPattern(FiringGraph):
+class YalaDrainingPattern(FiringGraph):
     """
     This class implement the main data structure used for fiting data. It is composed of weighted link in the form of
     scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
@@ -258,48 +203,47 @@ class YalaSingleDrainingPattern(FiringGraph):
     def __init__(self, n_inputs, n_outputs, index_output, **kwargs):
 
         self.n_inputs, self.n_outputs, self.index_output = n_inputs, n_outputs, index_output
-        kwargs.update({'project': 'YalaSingleDrainingPattern'})
+        kwargs.update({'project': 'YalaDrainingPattern'})
 
         # Invoke parent constructor
-        super(YalaSingleDrainingPattern, self).__init__(**kwargs)
+        super(YalaDrainingPattern, self).__init__(**kwargs)
 
     @staticmethod
-    def from_patterns(base_pattern, transient_pattern):
-        depth, n_core = 3, base_pattern.n_intersection + transient_pattern.n_core
-        matrices = augment_matrices(base_pattern.matrices, transient_pattern.matrices)
-        ax_levels = np.hstack((base_pattern.levels, transient_pattern.levels))
+    def from_patterns(pred_pattern, transient_pattern):
 
-        # If base structure is not empty add merging layer's vertices
-        if base_pattern.n_intersection > 0:
-            depth, n_core = depth + 1, n_core + 2
-            matrices = add_core_vertices(matrices, 2, n_core - 2)
-            ax_levels = np.hstack((ax_levels, np.array([1, 2])))
+        depth, n_core = 2, pred_pattern.size + transient_pattern.size,
+        matrices = augment_matrices(pred_pattern.matrices, transient_pattern.matrices)
+        ax_levels = np.hstack((pred_pattern.levels, transient_pattern.levels))
 
-            # Link core vertices
-            matrices['Cw'][base_pattern.n_intersection - 1, -2], matrices['Cw'][-2, -1] = 1, 1
-            matrices['Cw'][base_pattern.n_intersection + transient_pattern.n_intersection, -1] = 1
+        if not isinstance(pred_pattern, EmptyPattern):
+            depth, n_core = depth + 1, n_core + 1
 
-        # Set output connection
-        matrices['Ow'] = lil_matrix((n_core, base_pattern.n_outputs))
-        matrices['Ow'][-1, base_pattern.index_output] = 1
+            # Set core vertice's connections
+            matrices = add_core_vertices(matrices, 1, n_core - 1)
+            matrices['Cw'][0, -1], matrices['Cw'][1, -1] = 1, 1
+
+            # Update output connection
+            matrices['Ow'] = lil_matrix((n_core, pred_pattern.n_outputs))
+            matrices['Ow'][-1, pred_pattern.index_output] = 1
+
+            # Update levels
+            ax_levels = np.hstack((ax_levels, np.array([2])))
 
         # Create partitions
         partitions = [
-            {'indices': range(base_pattern.n_intersection), 'name': "base", 'precision': base_pattern.precision,
-             "depth": 2},
-            {'indices': [base_pattern.n_intersection + j for j in range(transient_pattern.n_intersection)],
-             "name": "transient", "depth": 3}
+            {'indices': range(pred_pattern.size), 'name': "pred", 'precision': pred_pattern.precision,
+             "depth": pred_pattern.depth},
+            {'indices': [pred_pattern.size + j for j in range(transient_pattern.size)],
+             "name": "transient", "depth": transient_pattern.depth}
         ]
 
         # Add firing graph kwargs
         kwargs = {
-            'partitions': partitions, 'precision': base_pattern.precision, 'depth': depth, 'matrices': matrices,
+            'partitions': partitions, 'precision': pred_pattern.precision, 'depth': depth, 'matrices': matrices,
             'ax_levels': ax_levels
         }
 
-        return YalaSingleDrainingPattern(
-            base_pattern.n_inputs, base_pattern.n_outputs, base_pattern.index_output, **kwargs
-        )
+        return YalaDrainingPattern(pred_pattern.n_inputs, pred_pattern.n_outputs, pred_pattern.index_output, **kwargs)
 
     @staticmethod
     def from_partition(partition, firing_graph, index_output=None, add_backward_firing=False):
@@ -319,26 +263,26 @@ class YalaSingleDrainingPattern(FiringGraph):
                 {'backward_firing': reduce_backward_firing(firing_graph.backward_firing, partition['indices'])}
             )
 
-        return YalaSingleDrainingPattern(firing_graph.I.shape[0], firing_graph.O.shape[1], index_output, **kwargs)
+        return YalaDrainingPattern(firing_graph.I.shape[0], firing_graph.O.shape[1], index_output, **kwargs)
 
 
-class YalaMutlipleDrainingPattern(FiringGraph):
+class YalaDrainingPatterns(FiringGraph):
 
     def __init__(self, n_inputs, n_outputs, **kwargs):
 
         self.n_inputs, self.n_outputs = n_inputs, n_outputs
-        kwargs.update({'project': 'YalaMutlipleDrainingPattern'})
+        kwargs.update({'project': 'YalaDrainingPatterns'})
 
         # Invoke parent constructor
-        super(YalaMutlipleDrainingPattern, self).__init__(**kwargs)
+        super(YalaDrainingPatterns, self).__init__(**kwargs)
 
     @staticmethod
     def check_patterns(l_patterns):
-        assert all([isinstance(o, YalaSingleDrainingPattern) for o in l_patterns]),\
-            "Only YalaSingleDrainingPattern can be used to build YalaMultipleDrainingPattern"
+        assert all([isinstance(o, YalaDrainingPattern) for o in l_patterns]),\
+            "Only YalaDrainingPattern can be used to build YalaDrainingPatters"
 
         assert len(set([o.depth for o in l_patterns])) == 1, \
-            "Patterns of different depth inputed in YalaMultipleDrainingPattern"
+            "Patterns of different depth inputed in YalaDrainingPatterns"
 
     @staticmethod
     def from_patterns(l_patterns):
@@ -346,7 +290,7 @@ class YalaMutlipleDrainingPattern(FiringGraph):
         if len(l_patterns) == 0:
             return None
 
-        YalaMutlipleDrainingPattern.check_patterns(l_patterns)
+        YalaDrainingPatterns.check_patterns(l_patterns)
 
         l_partitions, l_levels, depth = [], [], l_patterns[0].depth
         n_core_current, n_in, n_out = 0, l_patterns[0].n_inputs, l_patterns[0].n_outputs
@@ -378,10 +322,10 @@ class YalaMutlipleDrainingPattern(FiringGraph):
             'partitions': l_partitions, 'ax_levels': np.array(l_levels), 'matrices': d_matrices, 'depth': depth,
         }
 
-        return YalaMutlipleDrainingPattern(n_in, n_out, **kwargs)
+        return YalaDrainingPatterns(n_in, n_out, **kwargs)
 
 
-class YalaPredictingPattern(FiringGraph):
+class YalaPredPatterns(FiringGraph):
     """
     This class implement the main data structure used for fitting data. It is composed of weighted link in the form of
     scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
@@ -392,27 +336,27 @@ class YalaPredictingPattern(FiringGraph):
     def __init__(self, n_inputs, n_outputs, **kwargs):
 
         self.n_inputs, self.n_outputs = n_inputs, n_outputs
-        kwargs.update({'project': 'YalaPredictingPattern', 'depth': 2})
+        kwargs.update({'project': 'YalaPredPatterns', 'depth': 2})
 
         # Invoke parent constructor
-        super(YalaPredictingPattern, self).__init__(**kwargs)
+        super(YalaPredPatterns, self).__init__(**kwargs)
 
     @staticmethod
     def check_patterns(l_patterns):
-        assert all([isinstance(o, YalaBasePattern) for o in l_patterns]),\
-            "Only YalaBasePattern can be used to build YalaPredictingPattern"
+        assert all([isinstance(o, YalaPredPattern) for o in l_patterns]),\
+            "Only YalaPredPattern can be used to build YalaPredPatterns"
 
         assert len(set([o.depth for o in l_patterns])) == 1, \
-            "Patterns of different depth inputed in YalaPredictingPattern"
+            "Patterns of different depth inputed in YalaPredPatterns"
 
     @staticmethod
-    def from_base_patterns(l_base_patterns):
+    def from_pred_patterns(l_base_patterns):
 
         if len(l_base_patterns) == 0:
             return None
 
         # check patterns and intitialize variables
-        YalaPredictingPattern.check_patterns(l_base_patterns)
+        YalaPredPatterns.check_patterns(l_base_patterns)
         l_partitions, n_core, l_levels = [], 0, []
         n_inputs, n_outputs = l_base_patterns[0].n_inputs, l_base_patterns[0].n_outputs
         d_matrices = create_empty_matrices(n_inputs, n_outputs, 0)
@@ -436,7 +380,7 @@ class YalaPredictingPattern(FiringGraph):
         # Add firing graph kwargs
         kwargs = {'partitions': l_partitions, 'matrices': d_matrices, 'ax_levels': np.array(l_levels)}
 
-        return YalaPredictingPattern(l_base_patterns[0].n_inputs, l_base_patterns[0].n_outputs, **kwargs)
+        return YalaPredPatterns(l_base_patterns[0].n_inputs, l_base_patterns[0].n_outputs, **kwargs)
 
     def augment(self, l_base_patterns):
 
