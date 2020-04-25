@@ -180,6 +180,12 @@ def get_scores_multi_partition(l_partitions, firing_graph, min_firing, **kwargs)
     :param min_firing:
     :return:
     """
+    # TODO: this fuck can be vectorized
+    #  * firing graph is a YalaDrainingPatterns we can clearly extracte a sub firing graph with only transient patterns
+    #  * extract also a sub firing graph with only base patterns
+    #  * take the I and firing_backward['i'] matrix of transient patterns only fg and vectorized the selection
+    #  * the result is a I sized precision matrix > 0 when candidate
+    #  * For each non zero in I augment corresponding pred pattern only
     n, l_scores = 0, []
     for partition in l_partitions:
         # Extract Yala Single draining pattern and base pattern
@@ -227,6 +233,7 @@ def get_scores(transient_pattern, pred_pattern, min_firing, **kwargs):
     :param min_firing:
     :return:
     """
+
     # Get quantity of interest
     pattern_args = {'n_patterns': kwargs['max_patterns']}
     if pred_pattern is None:
@@ -238,9 +245,6 @@ def get_scores(transient_pattern, pred_pattern, min_firing, **kwargs):
 
     # For each valid candidate yield the pattern and the precision
     if sax_scores.nnz > 0:
-        # TODO: Add a property of transient pattern called "selectable":
-        #  A transient pattern is "selectable" iff # of input > level, else it is not selectable, in this case
-        #  Compute score of each indices
         l_indices = [i for i in (sax_scores > 0).nonzero()[0] if sax_t[i, 0] >= min_firing]
         l_precisions = [
             get_precision(sax_scores[i, 0], sax_t[i, 0], kwargs['p'], kwargs['r'], kwargs['weight']) for i in l_indices

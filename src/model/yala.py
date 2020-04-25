@@ -22,6 +22,7 @@ class Yala(object):
     #  * P2: Things that might help
     #       => Introducing a Dropout of certain vertices according to there precision ;)
     #       => For social justice we could give (overlap rate * min_firing) "free" overlapping activation.
+    #       => Check if a vectorization of utils.get_scores is possible
     #  * P1: Implement the methodology that enable sampling candidate on basis of there l0-co-activation.
     #       => we use sampling as it, multi data-point gathered
     #       => When selection the best is kept with all remaining, 2nd best is selected with all minus first,
