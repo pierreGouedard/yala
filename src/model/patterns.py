@@ -229,12 +229,12 @@ class YalaDrainingPattern(FiringGraph):
             # Update levels
             ax_levels = np.hstack((ax_levels, np.array([2])))
 
-        # Create partitions
+        # Create partitions /!\ convention if transient always at index 0, pred at index 1 /!\
         partitions = [
+            {'indices': [pred_pattern.size + j for j in range(transient_pattern.size)],
+             "name": "transient", "depth": transient_pattern.depth},
             {'indices': range(pred_pattern.size), 'name': "pred", 'precision': pred_pattern.precision,
              "depth": pred_pattern.depth},
-            {'indices': [pred_pattern.size + j for j in range(transient_pattern.size)],
-             "name": "transient", "depth": transient_pattern.depth}
         ]
 
         # Add firing graph kwargs
@@ -254,7 +254,7 @@ class YalaDrainingPattern(FiringGraph):
 
         # Add firing graph kwargs
         kwargs = {
-            'partitions': partition.get('partitions', None), 'precision': partition.get('precision', None),
+            'partitions': partition['partitions'], 'precision': partition.get('precision', None),
             'depth': partition['depth'], 'matrices': matrices, 'ax_levels': ax_levels
         }
 
@@ -381,6 +381,29 @@ class YalaPredPatterns(FiringGraph):
         kwargs = {'partitions': l_partitions, 'matrices': d_matrices, 'ax_levels': np.array(l_levels)}
 
         return YalaPredPatterns(l_base_patterns[0].n_inputs, l_base_patterns[0].n_outputs, **kwargs)
+
+    @staticmethod
+    def from_input_matrix(sax_I, l_partitions):
+
+        assert sax_I.shape[1] == len(l_partitions), "The # core vertices is not equal to the length of partitions"
+
+        if len(l_partitions) == 0:
+            return None
+
+        # Get output indices and intialize matrices
+        t_outs = tuple(d_pred['index_output'] for d_pred in l_partitions)
+        d_matrices = create_empty_matrices(
+            n_inputs=sax_I.shape[0], n_outputs=max(t_outs) + 1, n_core=sax_I.shape[1]
+        )
+
+        # Set matrices
+        d_matrices['Iw'] = sax_I
+        d_matrices['Ow'][range(sax_I.shape[1]), t_outs] = 1
+
+        # Add firing graph kwargs
+        kwargs = {'partitions': l_partitions, 'matrices': d_matrices, 'ax_levels': sax_I.sum(axis=0).A[0]}
+
+        return YalaPredPatterns(d_matrices['Iw'].shape[0], d_matrices['Ow'].shape[1], **kwargs)
 
     def augment(self, l_base_patterns):
 

@@ -41,6 +41,8 @@ def load_result(path):
 
 
 # Load result
+
+
 df_result_new, n_fail_new = load_result(os.path.join(inputs['new']['path'], inputs['new']['name']))
 df_result_new = df_result_new.astype({"train_accuracy": float, "test_accuracy": float, "time": float})
 
