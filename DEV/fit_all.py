@@ -42,8 +42,8 @@ params_xgb = {
 
 # Parameters for Yala
 params_yala = {
-    'sampling_rate': 0.8, 'n_sampling': 10, 'max_iter': 20, 'learning_rate': 1e-1, 'batch_size': 800,
-    'min_firing': 15, 'treshold_precision': 0.75
+    'sampling_rate': 0.8, 'n_sampling': 10, 'max_iter': 20, 'learning_rate': 5e-2, 'batch_size': 800,
+    'min_firing': 15, 'min_precision': 0.75, 'max_retry': 1
 }
 params_encoding = {
     'params_num_enc': {'n_bins': 20, 'method': 'signal'},

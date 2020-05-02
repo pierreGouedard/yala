@@ -4,10 +4,10 @@ from scipy.sparse import csc_matrix, diags, lil_matrix, tril, hstack
 
 # Local import
 from .patterns import EmptyPattern, YalaBasePattern, YalaPredPattern, YalaDrainingPattern, \
-    YalaDrainingPatterns, YalaPredPatterns
+    YalaDrainingPatterns, YalaPredPatterns, YalaOutputSimplePattern
 
 
-def build_firing_graph(sampler, ax_weights, level=1):
+def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
     """
 
     :param sampler:
@@ -23,13 +23,11 @@ def build_firing_graph(sampler, ax_weights, level=1):
 
     l_patterns = []
     if sampler.patterns is None:
-        for i in range(sampler.n_outputs):
+        for i in range(n_outputs):
             # Add Empty base and sampled intersection into a yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
-                EmptyPattern(sampler.n_inputs, sampler.n_outputs, i),
-                YalaBasePattern.from_input_indices(
-                    sampler.n_inputs, sampler.n_outputs, i, sampler.samples[i], level, ax_weights[i]
-                )
+                EmptyPattern(n_inputs, n_outputs, i),
+                YalaBasePattern.from_input_indices(n_inputs, n_outputs, i, sampler.samples[i], 1, ax_weights[i])
             ))
 
     else:
@@ -38,7 +36,7 @@ def build_firing_graph(sampler, ax_weights, level=1):
             l_patterns.append(YalaDrainingPattern.from_patterns(
                 pattern,
                 YalaBasePattern.from_input_indices(
-                    sampler.n_inputs, sampler.n_outputs, pattern.index_output, sampler.samples[i], level,
+                    pattern.n_inputs, pattern.n_outputs, pattern.index_output, sampler.samples[i], 1,
                     ax_weights[pattern.index_output]
                 )
             ))
@@ -69,6 +67,8 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
     sax_dist = sax_activations_sub.astype(int).transpose().dot(sax_activation_cs > 0).dot(sax_diff)
 
     # Compute standardized precision
+    # TODO: compute it for everybody instead of just base check it
+    #       It can be negative
     ax_p = sax_dist[ax_new_mask, :].toarray().sum(axis=1) * ax_precision[ax_new_mask]
     ax_p -= (sax_dist[ax_new_mask, :].toarray() * ax_precision).sum(axis=1)
     ax_p += (sax_dist.diagonal()[ax_new_mask] * ax_precision[ax_new_mask])
@@ -77,38 +77,61 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
     return ax_p
 
 
-def disclose_patterns_multi_output(X, firing_graph, drainer_params, ax_weights, ax_precision, min_firing,
-                                   overlap_rate, target_precision):
+def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
+                                   overlap_rate, min_precision, max_precision):
     """
 
-    :param X:
-    :param y:
+    :param server:
     :param firing_graph:
+    :param batch_size:
     :param drainer_params:
     :param ax_weights:
-    :param ax_precision:
     :param min_firing:
     :param overlap_rate:
+    :param min_precision:
+    :param max_precision:
     :return:
     """
-    l_patterns_new, l_patterns_selected = [], []
-    for i in range(firing_graph.n_outputs):
-        l_partition_sub = [partition for partition in firing_graph.partitions if partition['index_output'] == i]
+    d_new, d_selected, n = {}, {}, 0
+    sax_i = server.next_forward(batch_size, update_step=False).sax_data_forward
+    for i, v in server.get_outputs().items():
 
-        # Specify key word args for selection
+        # get partition
+        l_partition_sub = [partition for partition in firing_graph.partitions if partition['index_output'] in v]
+        l_partition_sub = sorted(l_partition_sub, key=lambda p: p['index_output'])
+
+        # Get already selected patterns for the output
+        l_selected_sub = [p for p in l_selected if p.index_output == i]
+
+        # Specify keyword args for selection
         kwargs = {
-            'precision': ax_precision[i], 'weight': ax_weights[i], 'p': drainer_params['p'][i],
-            'target_precision': target_precision, 'r': drainer_params['r'][i],
-            'max_patterns': len(firing_graph.I.nonzero()[0])
+            'weight': ax_weights[v], 'p': drainer_params['p'][v], 'r': drainer_params['r'][v],
+            "min_precision": min_precision, 'max_precision': max_precision
         }
-        l_new, l_selected = disclose_patterns(X, l_partition_sub, firing_graph, overlap_rate, min_firing, **kwargs)
-        l_patterns_new.extend(l_new)
-        l_patterns_selected.extend(l_selected)
+        l_new, l_selected_ = disclose_patterns(
+            sax_i, l_selected_sub, l_partition_sub, firing_graph, overlap_rate, min_firing, **kwargs
+        )
 
-    return l_patterns_new, l_patterns_selected
+        # Update output mapping
+        d_new[i] = list(zip(*(list(range(n, n + len(l_new))), l_new)))
+        n += len(l_new)
+
+        # Extend list of new patterns
+        d_selected[i] = l_selected_
+
+    # Get list of selected and new patterns
+    l_selected = [p.update_outputs(i, len(d_selected)) for i, l_p in d_selected.items() for p in l_p]
+    l_new = [p.update_outputs(i, n_outputs=n) for l_pats in d_new.values() for i, p in l_pats]
+
+    # set server backward pattern
+    server.pattern_backward = YalaOutputSimplePattern.from_mapping(
+        {k: [i for i, _ in l_pats] for k, l_pats in d_new.items()}
+    )
+
+    return sorted(l_new, key=lambda p: p.index_output), l_selected
 
 
-def disclose_patterns(sax_X, l_partitions, firing_graph, overlap_rate, min_firing, **kwargs):
+def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap_rate, min_firing, **kwargs):
     """
 
     :param X:
@@ -123,53 +146,53 @@ def disclose_patterns(sax_X, l_partitions, firing_graph, overlap_rate, min_firin
     """
 
     # Gather every candidate pattern and compute their activation
-    candidate_pred_pattern = get_score_multi_partition(l_partitions, firing_graph, min_firing, **kwargs)
+    candidate_pattern = get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, **kwargs)
 
-    if candidate_pred_pattern is None:
+    if candidate_pattern is None:
         return [], []
 
-    sax_activations_all = candidate_pred_pattern.propagate(sax_X)
+    sax_candidate = candidate_pattern.propagate(sax_X)
 
-    # Set variables
-    sax_activations_selected = lil_matrix(sax_activations_all.shape)
-    ax_overlap_mask = np.ones(sax_activations_all.shape[1], dtype=bool)
-    ax_candidate_selection = np.zeros(sax_activations_all.shape[1], dtype=bool)
+    # Set variables for selection
+    sax_selected = lil_matrix(sax_candidate.shape)
+    ax_is_distinct = np.ones(sax_candidate.shape[1], dtype=bool)
+    ax_is_selected = np.zeros(sax_candidate.shape[1], dtype=bool)
+
     n, l_patterns = 0, []
-    for d_score in sorted(candidate_pred_pattern.partitions, key=lambda x: x['precision'], reverse=True):
-        if not ax_overlap_mask[d_score['index_output']]:
+    for d_score in sorted(candidate_pattern.partitions, key=lambda x: x['precision'], reverse=True):
+        if not ax_is_distinct[d_score['index_output']]:
             continue
 
         # if target precision of a base pattern is not reached, drop the pattern
         if not d_score.get('is_new', True):
-            if d_score['precision'] < kwargs['target_precision']:
+            if d_score['precision'] < kwargs['min_precision']:
                 continue
 
         # Update variables
-        sax_activations_selected[:, n] = sax_activations_all[:, d_score['index_output']] > 0
-        ax_candidate_selection[n] = not d_score.get('is_new', True)
-        ax_overlap_mask = update_overlap_mask(sax_activations_selected, sax_activations_all, overlap_rate, min_firing)
+        sax_selected[:, n] = sax_candidate[:, d_score['index_output']] > 0
+        ax_is_selected[n] = (not d_score.get('is_new', True) or d_score['precision'] > kwargs['max_precision'])
+        ax_is_distinct = update_overlap_mask(sax_selected, sax_candidate, overlap_rate, min_firing)
 
         # Change index of output and add pattern
         l_patterns.append(YalaPredPattern.from_partition(
-            d_score, candidate_pred_pattern, index_output=l_partitions[0]['index_output']
-        ).update_outputs(0, n_outputs=1))
+            d_score, candidate_pattern, index_output=l_partitions[0]['index_output']
+        ))
         n += 1
 
     # Compute normalized precision
     ax_norm_precision = get_normalized_precision(
-        sax_activations_selected[:, :n].tocsc(),
-        np.array([pat.precision for pat in l_patterns]),
-        ax_candidate_selection[:n]
+        sax_selected[:, :n].tocsc(), np.array([pat.precision for pat in l_patterns]),
+        ax_is_selected[:n]
     )
-
-    l_new = [p for i, p in enumerate(l_patterns) if not ax_candidate_selection[i]]
-    l_selected = [pat for i, pat in enumerate(l_patterns) if ax_candidate_selection[i]]
-    l_selected = [p for i, p in enumerate(l_selected) if ax_norm_precision[i] > kwargs['target_precision']]
+    #
+    l_new = [p for i, p in enumerate(l_patterns) if not ax_is_selected[i]]
+    l_selected = [pat for i, pat in enumerate(l_patterns) if ax_is_selected[i]]
+    l_selected = [p for i, p in enumerate(l_selected) if ax_norm_precision[i] > kwargs['min_precision']]
 
     return l_new, l_selected
 
 
-def get_score_multi_partition(l_partitions, firing_graph, min_firing, **kwargs):
+def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, **kwargs):
     """
 
     :param l_partitions:
@@ -178,28 +201,28 @@ def get_score_multi_partition(l_partitions, firing_graph, min_firing, **kwargs):
     :param kwargs:
     :return:
     """
-
     # Get indices of transient and pred patterns
     ax_trans_indices = np.hstack([np.array(p['indices'])[p['partitions'][0]['indices']] for p in l_partitions])
     ax_pred_indices = np.hstack([np.array(p['indices'])[p['partitions'][1]['indices']] for p in l_partitions])
 
-    # Extract input matrices and precision of pred patterns
-    sax_pred_input = firing_graph.I[:, ax_pred_indices]
-    l_precisions = list(filter(lambda x: x is not None, [p['partitions'][1]['precision'] for p in l_partitions]))
+    # Extract activation matrices and precision of pred patterns
+    sax_pred = hstack([firing_graph.I[:, ax_pred_indices]] + [p.I[:, 0] for p in l_selected])
+    l_precisions = [p['partitions'][1]['precision'] for p in l_partitions] + [p.precision for p in l_selected]
+    l_precisions = list(filter(lambda x: x is not None, l_precisions))
 
     # Extract input matrices and backward fire count of transient patterns
     sax_weight = firing_graph.Iw[:, ax_trans_indices]
     sax_count = firing_graph.backward_firing['i'][:, ax_trans_indices.ravel()]
 
-    # Compute precision of transient bits
-    sax_precision = get_precision(
+    # Compute precision of transient bits organize as its input matrix
+    sax_trans = get_precision(
         sax_weight.astype(float), sax_count.astype(float), kwargs['p'], kwargs['r'], kwargs['weight'], min_firing
     )
 
-    return build_candidate_patterns(sax_pred_input, l_precisions, sax_precision, kwargs['precision'])
+    return build_pattern(sax_pred, l_precisions, sax_trans)
 
 
-def build_candidate_patterns(sax_pred_input, l_precs, sax_transient_prec, target_prec):
+def build_pattern(sax_pred, l_precisions, sax_trans):
     """
 
     :param sax_pred_I:
@@ -207,43 +230,40 @@ def build_candidate_patterns(sax_pred_input, l_precs, sax_transient_prec, target
     :param sax_transient_prec:
     :return:
     """
-
     # build candidate input matrix
-    l_inputs, n_pred = [sax_pred_input], len(l_precs)
-    for i in range(sax_transient_prec.shape[1]):
-
-        # Set target precision of transient
-        if len(l_precs):
-            target_prec = round(max(target_prec, l_precs[i]), 2) + 5e-3
-        else:
-            target_prec = round(target_prec, 2) + 5e-3
+    l_inputs, n_pred = [sax_pred], len(l_precisions)
+    for i in range(sax_trans.shape[1]):
 
         # Get each non zero entry in a single columns
-        sax_splitted_precision = diags(sax_transient_prec[:, i].A.ravel())
-        sax_splitted_precision = sax_splitted_precision.tocsc()[:, (sax_transient_prec[:, i] > target_prec).A.ravel()]
+        sax_split_trans = diags(sax_trans[:, i].A.ravel(), format='csc')[:, sax_trans[:, i].nonzero()[0]]
+
+        if sax_split_trans.nnz == 0:
+            continue
 
         # Append list of precision
-        l_precs.extend(list(sax_splitted_precision.sum(axis=0).A[0]))
+        l_precisions.extend(list(sax_split_trans.sum(axis=0).A[0]))
 
-        # Build input matrix of candidate predicitor and add it to list
-        sax_I = (sax_splitted_precision > 0)
-        if sax_pred_input.shape[1] > 0:
-            sax_I += sax_pred_input[:, np.ones(sax_splitted_precision.shape[1], dtype=int) * i]
+        # Build input matrix of candidate predictor and add it to list
+        sax_I = (sax_split_trans > 0)
+
+        if sax_pred.shape[1] > 0:
+            sax_I += sax_pred[:, np.ones(sax_split_trans.shape[1], dtype=int) * i]
+
         l_inputs.append(sax_I)
 
     # build partition
     l_partitions = [
-        {"indices": [i], "precision": p, "index_output": i, "is_new": False} for i, p in enumerate(l_precs[:n_pred])
+        {"indices": [i], "precision": p, "index_output": i, "is_new": False} for i, p in enumerate(l_precisions[:n_pred])
     ]
 
     l_partitions.extend([
-        {"indices": [n_pred + i], "precision": p, "index_output": n_pred + i} for i, p in enumerate(l_precs[n_pred:])
+        {"indices": [n_pred + i], "precision": p, "index_output": n_pred + i} for i, p in enumerate(l_precisions[n_pred:])
     ])
 
     return YalaPredPatterns.from_input_matrix(hstack(l_inputs), l_partitions)
 
 
-def get_precision(sax_weight, sax_count, p, r, w0, n0):
+def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0):
     """
 
     :param drainer_params:
@@ -251,12 +271,15 @@ def get_precision(sax_weight, sax_count, p, r, w0, n0):
     :param t:
     :return:
     """
+    # Create mask candidate
     sax_mask = (sax_weight > 0).multiply(sax_count >= n0)
-    sax_precision = (sax_weight.multiply(sax_mask) - (w0 * sax_mask))\
-        .multiply(sax_mask.multiply(sax_count * (p + r)).power(-1))
-    sax_precision += (sax_precision > 0) * (float(p) / (p + r))
 
-    return sax_precision
+    # compute precision: (original formula: float(score - weight) / (t * (p + r)) + float(p) / (p + r))
+    sax_precision = (sax_weight.multiply(sax_mask) - (sax_mask.dot(diags(ax_w, format='csc'))))\
+        .multiply(sax_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc'))).power(-1))
+    sax_precision += (sax_precision > 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
+
+    return sax_precision.multiply(sax_precision > 0)
 
 
 def update_overlap_mask(sax_base, sax_patterns, overlap_rate, min_firing):

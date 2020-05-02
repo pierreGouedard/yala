@@ -39,10 +39,7 @@ def load_result(path):
 
     return pd.DataFrame.from_records(l_results), n_fail
 
-
 # Load result
-
-
 df_result_new, n_fail_new = load_result(os.path.join(inputs['new']['path'], inputs['new']['name']))
 df_result_new = df_result_new.astype({"train_accuracy": float, "test_accuracy": float, "time": float})
 
@@ -52,6 +49,3 @@ df_result_old = df_result_old.astype({"train_accuracy": float, "test_accuracy": 
 # stats
 df_result_new.groupby('model').agg([np.mean, min, max, np.std])
 df_result_old.groupby('model').agg([np.mean, min, max, np.std])
-
-import IPython
-IPython.embed()

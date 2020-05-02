@@ -1,6 +1,6 @@
 # Global imports
 import numpy as np
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, eye
 
 # Local import
 from firing_graph.core.data_structure.graph import FiringGraph
@@ -430,3 +430,34 @@ class YalaPredPatterns(FiringGraph):
             n_core += 1
 
         return self
+
+
+class YalaOutputSimplePattern(FiringGraph):
+    """
+    This class implement the main data structure used for fitting data. It is composed of weighted link in the form of
+    scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
+    track of the firing of vertices.
+
+    """
+    def __init__(self, n_inputs, n_outputs, **kwargs):
+
+        self.n_inputs, self.n_outputs = n_inputs, n_outputs
+        kwargs.update({'project': 'YalaOutputSimplePattern', 'depth': 2, 'ax_levels': np.ones(n_outputs)})
+
+        # Invoke parent constructor
+        super(YalaOutputSimplePattern, self).__init__(**kwargs)
+
+    @staticmethod
+    def from_mapping(d_mapping):
+
+        n_inputs, n_outputs = len(d_mapping.keys()), sum([len(v) for v in d_mapping.values()])
+        d_matrices, l_partitions = create_empty_matrices(n_inputs, n_outputs, n_outputs), []
+
+        for k, v in d_mapping.items():
+            d_matrices['Iw'][k, v], d_matrices['Ow'] = True, eye(n_outputs, format='csc')
+            l_partitions.append({'indices': list(map(int, v)), 'index_input': int(k)})
+
+        return YalaOutputSimplePattern(n_inputs, n_outputs, **{'partitions': l_partitions, 'matrices': d_matrices})
+
+    def get_io_mapping(self):
+        return {p['index_input']: p['indices'] for p in self.partitions}

@@ -19,13 +19,10 @@ class Yala(object):
 
     """
     # TODO:
-    #  * P2: Things that might help
+    #  * P1: Things that might help
     #       => Introducing a Dropout of certain vertices according to there precision ;)
-    #  * P1: Implement the methodology that enable sampling candidate on basis of there l0-co-activation.
-    #       => we use sampling as it, multi data-point gathered
-    #       => When selection the best is kept with all remaining, 2nd best is selected with all minus first,
-    #       => 3rd is selected with all but 1st and 2nd, ..., kth is selected with remaining but 1st, 2nd, ..., (k-1)th
-    #       => At the reach of l0, do the usual selection of remaining vertices, stop if no more remaining sampled bits
+    #       => Enable to de-multiply outputs so to have a penalty more specific to each current precision level (boost
+    #           speed)
 
     def __init__(self,
                  sampling_rate=0.8,
@@ -36,8 +33,7 @@ class Yala(object):
                  batch_size=1000,
                  firing_graph=None,
                  min_firing=10,
-                 max_precision=0.95,
-                 treshold_precision=0.75,
+                 min_precision=0.75,
                  overlap_rate=0.5,
                  ):
 
@@ -47,8 +43,7 @@ class Yala(object):
         self.max_iter = max_iter
         self.max_retry = max_retry
         self.learning_rate = learning_rate
-        self.max_precision = max_precision
-        self.treshold_precision = treshold_precision
+        self.min_precision = min_precision
         self.overlap_rate = overlap_rate
         self.batch_size = batch_size
 
@@ -70,31 +65,27 @@ class Yala(object):
         ax_precision = np.asarray(y.sum(axis=0) / y.shape[0])[0]
 
         # Get scoring process params
-        ax_p, ax_r = set_score_params(ax_precision, ax_precision * (1 + self.learning_rate))
+        ax_p, ax_r = set_score_params(ax_precision + self.learning_rate, ax_precision + (2 * self.learning_rate))
         ax_weight = ((ax_p - (ax_precision * (ax_p + ax_r))) * self.min_firing).astype(int) + 1
         self.drainer_params.update({'p': ax_p, 'r': ax_r})
 
-        return ax_precision * (1 + self.learning_rate), ax_weight
+        return ax_precision + self.learning_rate, ax_weight
 
-    def __core_parameters(self, l_patterns, ax_precision):
+    def __core_parameters(self, l_patterns):
         """
 
         :param l_patterns:
         :return:
         """
-
         # Set current precision for each structure
-        ax_precision_ = ax_precision.copy()
-        for pattern in l_patterns:
-            ax_precision_[pattern.index_output] = min(pattern.precision, ax_precision_[pattern.index_output])
-        ax_precision = ax_precision_.clip(ax_precision, self.max_precision / (1 + self.learning_rate))
+        ax_precision = np.array([p.precision for p in l_patterns])
 
         # Get corresponding reward / penalty and update drainer_params
-        ax_p, ax_r = set_score_params(ax_precision, ax_precision * (1 + self.learning_rate))
+        ax_p, ax_r = set_score_params(ax_precision + self.learning_rate, ax_precision + (2 * self.learning_rate))
         ax_weights = ((ax_p - (ax_precision * (ax_p + ax_r))) * self.min_firing).astype(int) + 1
         self.drainer_params.update({'p': ax_p, 'r': ax_r})
 
-        return ax_precision * (1 + self.learning_rate), ax_weights
+        return (ax_precision + self.learning_rate).round(2), ax_weights
 
     def fit(self, X, y, update=False):
         """
@@ -112,13 +103,10 @@ class Yala(object):
         self.server = ArrayServer(X, y, pattern_backward=self.firing_graph).stream_features()
         self.n_inputs, self.n_outputs = X.shape[1], y.shape[1]
         self.batch_size = min(y.shape[0], self.batch_size)
-
-        self.sampler = SupervisedSampler(
-            self.server, X.shape[1], y.shape[1], self.batch_size, self.sampling_rate, self.n_sampling,
-        )
+        self.sampler = SupervisedSampler(self.server, self.batch_size, self.sampling_rate, self.n_sampling)
 
         # Core loop
-        n_no_update, n_test, l_patterns_test = 0, 0, []
+        n_no_update, l_patterns_test = 0, []
         for i in range(self.max_iter):
             print("[YALA]: Iteration {}".format(i))
 
@@ -126,8 +114,10 @@ class Yala(object):
             ax_precision, ax_weights = self.__init_parameters(y)
 
             # Initial sampling
-            firing_graph = build_firing_graph(self.sampler.generative_sampling(), ax_weights)
-            stop, n, l_patterns_selected = False, 0, []
+            firing_graph = build_firing_graph(
+                self.sampler.generative_sampling(), ax_weights, n_inputs=self.n_inputs, n_outputs=self.n_outputs
+            )
+            stop, n, l_selected = False, 0, []
 
             # Core loop
             while not stop:
@@ -138,21 +128,18 @@ class Yala(object):
                     .firing_graph
 
                 # Disclose new patterns
-                self.sampler.patterns, l_patterns_selected_ = disclose_patterns_multi_output(
-                    X, firing_graph, self.drainer_params, ax_weights, ax_precision, self.min_firing,
-                    self.overlap_rate, self.treshold_precision
+                self.sampler.patterns, l_selected = disclose_patterns_multi_output(
+                    l_selected, self.server, self.batch_size, firing_graph, self.drainer_params, ax_weights,
+                    self.min_firing, self.overlap_rate, self.min_precision, 1. - self.learning_rate
                 )
-
-                # Compute stop criteria
-                l_patterns_selected.extend(l_patterns_selected_)
-                l_patterns_test.append(l_patterns_selected_)
 
                 stop = (len(self.sampler.patterns) == 0)
 
                 if not stop:
 
                     # update parameters
-                    ax_precision, ax_weights = self.__core_parameters(self.sampler.patterns, ax_precision)
+                    ax_precision, ax_weights = self.__core_parameters(self.sampler.patterns)
+
                     print("[YALA]: {} pattern updated, targeted precision are {}".format(
                         len(self.sampler.patterns), ax_precision)
                     )
@@ -161,24 +148,24 @@ class Yala(object):
                     firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), ax_weights)
                     n += 1
 
-            n_test += 1
             # Escape main loop on last retry condition
-            if len(l_patterns_selected) == 0:
+            if len(l_selected) == 0:
                 n_no_update += 1
-                if n_no_update >= self.max_retry:
+                if n_no_update > self.max_retry:
                     break
             else:
                 n_no_update = 0
 
             # Merge firing graph
             if self.firing_graph is None:
-                self.firing_graph = YalaPredPatterns.from_pred_patterns(l_base_patterns=l_patterns_selected)
+                self.firing_graph = YalaPredPatterns.from_pred_patterns(l_base_patterns=l_selected)
 
             else:
-                self.firing_graph.augment(l_patterns_selected)
+                self.firing_graph.augment(l_selected)
 
             # Update sampler attributes
             self.server.pattern_mask = self.firing_graph
+            self.server.pattern_backward = None
             self.sampler.patterns = None
 
         return self
@@ -191,7 +178,7 @@ class Yala(object):
         """
         ax_probas = self.predict_probas(X)
         if ax_probas.shape[1] == 1:
-            ax_preds = (ax_probas[:, 0] > self.treshold_precision).astype(int)
+            ax_preds = (ax_probas[:, 0] > self.min_precision).astype(int)
 
         else:
             ax_preds = ax_probas.argmax(axis=1)
@@ -216,5 +203,3 @@ class Yala(object):
 
         return ax_probas
 
-    def score(self, X, y):
-        raise NotImplementedError
