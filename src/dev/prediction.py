@@ -30,8 +30,9 @@ class ClassifierSelector(object):
     allowed_score = ['precision', 'accuracy', 'balanced_accuracy', 'f1_score', 'roc']
     allowed_model = ['dt', 'rf', 'xgb', 'yala']
 
-    def __init__(self, df_data, model_classification, params_features, params_features_grid, params_mdl, params_mdl_grid,
-                 params_fold, scoring, path_backup=None):
+    def __init__(self, df_data, model_classification, params_features, params_features_grid, params_mdl,
+                 params_mdl_grid, params_fold, scoring, df_weights=None, weight_arg='sample_weight',
+                 path_backup=None):
         """
 
         Parameters
@@ -67,6 +68,7 @@ class ClassifierSelector(object):
         # Core parameter classifier
         self.model_classification = model_classification
         self.scoring = scoring
+        self.weight_arg = weight_arg
 
         # Parameters of models builder and model
         self.params_features = params_features
@@ -75,7 +77,7 @@ class ClassifierSelector(object):
         self.params_mdl_grid = params_mdl_grid
 
         # Core attribute of classifier
-        self.fold_manager = FoldManager(df_data, **params_fold)
+        self.fold_manager = FoldManager(df_data, df_weights=df_weights, **params_fold)
         self.is_fitted = False
         self.model = None
         self.d_search = None
@@ -101,7 +103,8 @@ class ClassifierSelector(object):
         associated.
 
         """
-        if len(self.params_features_grid) * len(self.params_mdl_grid) <= 1:
+
+        if len(self.params_features_grid) <= 1 and len(self.params_mdl_grid) <= 1:
             return {0: {"params_feature": self.params_features, "params_mdl": self.params_mdl}, 'best_key': 0}
 
         d_search, best_score = {}, 0.
@@ -153,12 +156,19 @@ class ClassifierSelector(object):
 
             # Instantiate model and cross validate the hyper parameter
             model, args = get_model(self.model_classification, d_mdl_grid_instance)
+            d_eval = self.fold_manager.get_eval_data(d_feature_params)
             l_errors = []
 
             for d_train, d_test in self.fold_manager.generate_folds(d_feature_params):
                 # Fit and predict
                 if 'input_shape' in args.keys():
                     args['input_shape'] = d_train['X'].shape[1]
+
+                if 'w' in d_train.keys():
+                    args[self.weight_arg] = d_train['w']
+
+                if d_eval is not None:
+                    args['eval_set'] = d_eval
 
                 model.fit(d_train['X'], d_train['y'], **args)
                 score = get_score(self.scoring, model.predict(d_test['X']), d_test['y'])
@@ -189,16 +199,22 @@ class ClassifierSelector(object):
         # Recover optimal parameters
         d_feature_params = self.d_search[self.d_search['best_key']]['params_feature']
         d_model_params = self.d_search[self.d_search['best_key']]['params_mdl']
-
-        X, y = self.fold_manager.get_train_data(d_feature_params)
+        d_train = self.fold_manager.get_train_data(d_feature_params)
 
         # Instantiate model and fit it
         model, args = get_model(self.model_classification, d_model_params)
+        d_eval = self.fold_manager.get_eval_data(d_feature_params)
 
         if 'input_shape' in args.keys():
-            args['input_shape'] = X.shape[1]
+            args['input_shape'] = d_train['X'].shape[1]
 
-        model.fit(X, y, **args)
+        if 'w' in d_train.keys():
+            args[self.weight_arg] = d_train['w']
+
+        if d_eval is not None:
+            args['eval_set'] = d_eval
+
+        model.fit(d_train['X'], d_train['y'], **args)
 
         return model
 
@@ -326,7 +342,12 @@ class Classifier(object):
         """
         features = self.feature_builder.transform(df)
         preds = self.model_classification.predict_proba(features)
-        return pd.DataFrame(preds, index=df.index, columns=self.feature_builder.label_encoder.classes_)
+
+        if self.feature_builder.target_transform == 'sparse_encoding':
+            df_probas = pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_[[1]])
+            return df_probas
+
+        return pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_)
 
     def evaluate(self, df_train, df_test):
         """

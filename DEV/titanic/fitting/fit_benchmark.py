@@ -10,10 +10,10 @@ from src.dev.prediction import ClassifierSelector
 
 # Declare input and outputs
 inputs = {
-    'train': {'path': features_path, 'name': 'train.csv'}
+    'train': {'path': features_path, 'name': 'titanic/train.csv'}
 }
 outputs = {
-    'model': {'path': models_path, 'name': '{}.pickle'},
+    'model': {'path': models_path, 'name': 'model={}.pickle'},
 }
 
 parameters = {

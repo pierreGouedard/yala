@@ -37,13 +37,12 @@ params_xgb = {
     'nthread': 2, 'n_jobs': 2, 'objective': "binary:logistic", "verbosity": 0, 'lambda': 0,
     'min_child_leaf': 3, "colsample_bytree": 0.8, "subsample": 0.8, "learning_rate": 0.05, 'gamma': 2,
     'alpha': 1e-4, "max_depth": 3, "n_estimators": 200
-
 }
 
 # Parameters for Yala
 params_yala = {
     'sampling_rate': 0.8, 'n_sampling': 10, 'max_iter': 20, 'learning_rate': 5e-2, 'batch_size': 800,
-    'min_firing': 15, 'min_precision': 0.75, 'max_retry': 1
+    'drainer_batch_size': 800, 'min_firing': 15, 'min_precision': 0.75, 'max_retry': 1
 }
 params_encoding = {
     'params_num_enc': {'n_bins': 20, 'method': 'signal'},

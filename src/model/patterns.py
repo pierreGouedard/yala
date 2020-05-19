@@ -342,6 +342,10 @@ class YalaPredPatterns(FiringGraph):
         super(YalaPredPatterns, self).__init__(**kwargs)
 
     @staticmethod
+    def from_dict(d_struct, **graph_kwargs):
+        return YalaPredPatterns(n_inputs=d_struct['n_inputs'], n_outputs=d_struct['n_outputs'], **graph_kwargs)
+
+    @staticmethod
     def check_patterns(l_patterns):
         assert all([isinstance(o, YalaPredPattern) for o in l_patterns]),\
             "Only YalaPredPattern can be used to build YalaPredPatterns"
@@ -430,6 +434,16 @@ class YalaPredPatterns(FiringGraph):
             n_core += 1
 
         return self
+
+    def copy(self):
+
+        d_graph = super(YalaPredPatterns, self).to_dict(deep_copy=True)
+        d_struct = {
+            'n_inputs': self.n_inputs,
+            'n_outputs': self.n_outputs,
+        }
+
+        return self.from_dict(d_struct, **{k: v for k, v in d_graph.items()})
 
 
 class YalaOutputSimplePattern(FiringGraph):

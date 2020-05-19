@@ -1,6 +1,8 @@
 # Global import
 import re
 from pandas import isna
+from numpy import nan
+from sklearn.preprocessing import StandardScaler
 
 
 def prepare_titanic_data(df):
@@ -49,3 +51,26 @@ def prepare_titanic_data(df):
     df['age'].fillna(mean_age, inplace=True)
 
     return df
+
+
+def prepare_higgs_data(df, l_col_cats, l_targets, missing_value=None, scaler=None):
+
+    # get list of numerical features
+    l_num_features = sorted([c for c in df.columns if c not in l_col_cats + l_targets])
+
+    # Transform to nan missing value
+    if missing_value is not None:
+        df = df.replace(to_replace=missing_value, value=nan)
+
+    # Create scaler
+    if scaler is None:
+        scaler = StandardScaler()
+        ax_standardize = scaler.fit_transform(df[l_num_features])
+
+    else:
+        ax_standardize = scaler.transform(df[l_num_features])
+
+    # Fit scaler and standardized numerical features
+    df = df.assign(**{c: ax_standardize[:, i] for i, c in enumerate(l_num_features)})
+
+    return df, scaler

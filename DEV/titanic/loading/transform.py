@@ -4,7 +4,7 @@ import pandas as pd
 
 # Local import
 from settings import raw_path, features_path
-from src.dev.titanic import prepare_titanic_data
+from src.dev.utils import prepare_titanic_data
 
 # Declare input and outputs
 inputs = {

@@ -1,6 +1,7 @@
 # Global imports
 import numpy as np
 from scipy.sparse import csc_matrix, diags, lil_matrix, tril, hstack
+from sklearn.model_selection import train_test_split
 
 # Local import
 from .patterns import EmptyPattern, YalaBasePattern, YalaPredPattern, YalaDrainingPattern, \
@@ -47,6 +48,34 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
     return firing_graph
 
 
+def select_patterns(l_selected, l_dropouts, firing_graph, X, dropout_rate=0.2):
+
+    l_selected_old = []
+    if firing_graph is not None:
+        l_selected_old = [YalaPredPattern.from_partition(partition, firing_graph)
+                          for partition in firing_graph.partitions]
+
+    # Merge firing graph
+    if dropout_rate > 0:
+
+        # Dropout patterns
+        l_candidates = l_selected + l_dropouts + l_selected_old
+        l_dropout_indices = [i for i in range(len(l_candidates)) if np.random.binomial(1, dropout_rate)]
+
+        # Build lists
+        l_dropouts_new = [c for i, c in enumerate(l_candidates) if i in l_dropout_indices]
+        l_selected_new = [c for i, c in enumerate(l_candidates) if i not in l_dropout_indices]
+
+    else:
+        l_selected_new, l_dropouts_new = l_selected + l_dropouts + l_selected_old, []
+
+    print(len(l_dropouts_new))
+    print(len(l_selected_new))
+    firing_graph = YalaPredPatterns.from_pred_patterns(l_base_patterns=l_selected_new)
+
+    return firing_graph, l_dropouts_new
+
+
 def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
 
     # If no candidate for norm return empty list
@@ -67,8 +96,6 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
     sax_dist = sax_activations_sub.astype(int).transpose().dot(sax_activation_cs > 0).dot(sax_diff)
 
     # Compute standardized precision
-    # TODO: compute it for everybody instead of just base check it
-    #       It can be negative
     ax_p = sax_dist[ax_new_mask, :].toarray().sum(axis=1) * ax_precision[ax_new_mask]
     ax_p -= (sax_dist[ax_new_mask, :].toarray() * ax_precision).sum(axis=1)
     ax_p += (sax_dist.diagonal()[ax_new_mask] * ax_precision[ax_new_mask])
@@ -184,6 +211,7 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap_rat
         sax_selected[:, :n].tocsc(), np.array([pat.precision for pat in l_patterns]),
         ax_is_selected[:n]
     )
+
     #
     l_new = [p for i, p in enumerate(l_patterns) if not ax_is_selected[i]]
     l_selected = [pat for i, pat in enumerate(l_patterns) if ax_is_selected[i]]

@@ -14,13 +14,22 @@ class FoldManager(object):
 
     """
     allowed_methods = ['standard', 'stratified']
+    def __init__(self, df_data, params_builder, nb_folds, df_weights=None, method='standard', test_size=0.2,
+                 use_eval_set=False, eval_function=None, eval_size=0.1, target_name='target'):
 
-    def __init__(self, df, params_builder, nb_folds, method='standard', test_size=0.2, target_name='target'):
+        # Get base parmeters
+        self.target_name, self.use_eval_set, self.eval_function = target_name, use_eval_set, eval_function
 
-        self.target_name = target_name
+        # Split data set into a train / test and Validation if necessary
+        self.df_train, self.df_test = train_test_split(df_data, test_size=test_size, shuffle=True)
 
-        # Split data set into a train / test
-        self.df_train, self.df_test = train_test_split(df, test_size=test_size, shuffle=True)
+        if self.use_eval_set:
+            self.df_train, self.df_eval = train_test_split(df_data, test_size=eval_size, shuffle=True)
+
+        # Set weights
+        self.df_weights = None
+        if df_weights is not None:
+            self.df_weights = df_weights
 
         # Set method to build feature
         self.params_builder = params_builder
@@ -57,8 +66,7 @@ class FoldManager(object):
 
         Returns
         -------
-        tuple
-            Features and target as numpy.ndarray
+        dict
 
         """
         # Create models builder if necessary
@@ -68,7 +76,41 @@ class FoldManager(object):
 
         X, y = self.feature_builder.transform(self.df_train, target=True)
 
-        return X, y
+        if self.df_weights is not None:
+            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_train.index].values}
+
+        return {"X": X, "y": y}
+
+    def get_eval_data(self, params_features):
+        """
+        Build a data set composed of models. The target is also return, if specified.
+
+        Parameters
+        ----------
+        params_features : dict
+            kw parameters to build features.
+
+        Returns
+        -------
+        dict
+
+        """
+
+        if not self.use_eval_set:
+            return None
+
+        # Create models builder if necessary
+        if self.feature_builder is None:
+            self.feature_builder = FeatureBuilder(**self.params_builder)\
+                .build(self.df_train, params_features)
+
+        X, y = self.feature_builder.transform(self.df_eval, target=True)
+
+        if self.df_weights is not None:
+            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_eval.index].values,
+                    "eval_function": self.eval_function}
+
+        return {"X": X, "y": y, "eval_function": self.eval_function}
 
     def get_test_data(self, params_features=None):
         """
@@ -81,8 +123,8 @@ class FoldManager(object):
 
         Returns
         -------
-        tuple
-            Features and target as numpy.ndarray
+        dict
+            Features and target as
 
         """
         # Create models builder if necessary
@@ -92,11 +134,20 @@ class FoldManager(object):
 
         X, y = self.feature_builder.transform(self.df_test, target=True)
 
-        return X, y
+        if self.df_weights is not None:
+            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_test.index].values}
+
+        return {"X": X, "y": y}
 
     def get_features(self, df):
         """
         Build feature.
+        # Create models builder if necessary
+        if self.feature_builder is None:
+            self.feature_builder = FeatureBuilder(**self.params_builder)\
+                .build(self.df_train, params_features)
+
+        X, y = self.feature_builder.transform(self.df_test, target=True)
 
         Parameters
         ----------
@@ -131,25 +182,30 @@ class FoldManager(object):
         if self.kf is not None:
             # Iterate over different folds
             for l_train, l_val in self.kf.split(self.df_train):
+                index_train, index_val = list(self.df_train.index[l_train]), list(self.df_train.index[l_val])
 
                 # Create models  builder if necessary
                 self.feature_builder = FeatureBuilder(**self.params_builder)\
-                    .build(self.df_train.loc[self.df_train.index[l_train]], params_features)
+                    .build(self.df_train.loc[index_train], params_features)
 
                 # Get features
-                X, y = self.feature_builder.transform(self.df_train, target=True)
+                X, y = self.feature_builder.transform(self.df_train.loc[index_train + index_val], target=True)
 
                 # Build train / validation set
                 X_train, y_train = X[l_train, :], y[l_train]
                 X_val, y_val = X[l_val, :], y[l_val]
 
+                if self.df_weights is not None:
+                    w_train, w_val = self.df_weights.loc[index_train].values, self.df_weights.loc[index_val].values
+                    yield {'X': X_train, 'y': y_train, 'w': w_train}, {'X': X_val, 'y': y_val, 'w': w_val}
+
                 yield {'X': X_train, 'y': y_train}, {'X': X_val, 'y': y_val}
 
         else:
+            d_train = self.get_train_data(params_features, force_recompute=True)
+            d_test = self.get_test_data()
 
-            X_train, y_train = self.get_train_data(params_features, force_recompute=True)
-            X_test, y_test = self.get_test_data()
-            yield {'X': X_train, 'y': y_train}, {'X': X_test, 'y': y_test}
+            yield d_train, d_test
 
 
 class FeatureBuilder(object):
@@ -273,7 +329,7 @@ class FeatureBuilder(object):
                     y = csc_matrix(y[:, np.newaxis] > 0)
 
             else:
-                y = df_data.loc[:, self.target_name].values
+                y = df_data.loc[:, [self.target_name]].values
 
             return X, y
 

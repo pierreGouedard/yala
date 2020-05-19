@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.sparse import csc_matrix, hstack
+from scipy.sparse import csc_matrix, hstack, csr_matrix, coo_matrix, lil_matrix
 from sklearn.preprocessing import OneHotEncoder
 
 
@@ -71,19 +71,10 @@ class NumEncoder(object):
         elif self.method == 'signal':
             # Reduce n_bins if necessary and compute bounds
             self.n_bins = min(len(np.unique(X)), self.n_bins)
-            max_, min_ = max(X), min(X)
+            ax_bounds = np.quantile(X[~np.isnan(X)], [0.05, 0.95])
 
             # Fit from bounds
-            self.fit_from_bound(max_, min_)
-
-        elif self.method == 'quantile':
-            n = self.n_quantile
-            l_quantiles = [np.percentile(X, 100 * (float(i) / n)) for i in range(n + 1)]
-            self.fit_from_quantiles(l_quantiles, self.n_bins / n)
-
-        elif self.method == 'clusters':
-            n = self.n_cluster
-            raise NotImplementedError
+            self.fit_from_bound(ax_bounds[1], ax_bounds[0])
 
         else:
             raise ValueError(
@@ -93,36 +84,14 @@ class NumEncoder(object):
         return self
 
     def fit_from_bound(self, max_, min_, res=1e-4):
-
         # Computes bins
         if max_ - res < min_:
             max_ = min_
 
-        self.bins = {i: x for i, x in enumerate(np.unique(np.linspace(min_, max_, self.n_bins)))}
-
-    def fit_from_quantiles(self, l_quantiles, k):
-
-        self.bins = {}
-        for i, (min_, max_) in enumerate(zip(l_quantiles[:-1], l_quantiles[1:])):
-            self.bins.update({i * k + j: x for j, x in enumerate(np.unique(np.linspace(min_, max_, k + 1))[:-1])})
-
-        # Set last quantile to max value
-        self.bins[max(self.bins.keys())] = l_quantiles[-1]
+        self.bins = np.linspace(min_, max_, self.n_bins)
 
     def transform(self, ax_continuous):
-
-        ax_bits = np.zeros((ax_continuous.shape[0], ax_continuous.shape[1] * 2 * self.n_bins), dtype=bool)
-
-        for i, ax in enumerate(ax_continuous):
-            for j, x in enumerate(ax):
-
-                ax_code = np.array(
-                    [b <= x for _, b in sorted(self.bins.items(), key=lambda t: t[0])] +
-                    [x < b for _, b in sorted(self.bins.items(), key=lambda t: t[0])],
-                    dtype=bool
-                )
-                ax_bits[i, j * 2 * self.n_bins: (j + 1) * 2 * self.n_bins] = ax_code
-
+        ax_bits = np.hstack((self.bins <= ax_continuous, ax_continuous < self.bins))
         return csc_matrix(ax_bits)
 
     def inverse_transform(self, sax_bits, agg='mean'):
@@ -200,7 +169,7 @@ class HybridEncoder():
         self.num_cols = num_cols
 
         # Create encoders
-        self.cat_enc =CatEncoder(**params_cat_enc)
+        self.cat_enc = CatEncoder(**params_cat_enc)
         self.num_encs = {n: NumEncoder(**params_num_enc) for n in num_cols}
         self.map_encoders = None
 
@@ -236,15 +205,18 @@ class HybridEncoder():
         for ind in self.num_cols:
             self.num_encs[ind].fit(self.get_array_from_input(X, [ind]))
 
+        return self
+
     def transform(self, X):
         # Transform categorical features
-        X_encoded = self.cat_enc.transform(self.get_array_from_input(X, self.cat_cols))
+        X_encoded = self.cat_enc.transform(self.get_array_from_input(X, self.cat_cols)).tocsc()
 
-        # transform numericals features
+        # transform numerical features
+        l_num_encoded = []
         for ind in self.num_cols:
-            X_encoded = hstack([X_encoded, self.num_encs[ind].transform(self.get_array_from_input(X, [ind]))])
+            l_num_encoded.append(self.num_encs[ind].transform(self.get_array_from_input(X, [ind])))
 
-        return X_encoded.tocsc()
+        return hstack([X_encoded] + l_num_encoded)
 
     @staticmethod
     def get_array_from_input(X, l_indices):
