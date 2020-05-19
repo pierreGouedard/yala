@@ -18,9 +18,6 @@ class Yala(object):
     In addition it implements model specific method of interest.
 
     """
-    # TODO:
-    #  * Things that might help
-    #    => Introducing a Dropout of certain vertices according to there precision
 
     def __init__(self,
                  sampling_rate=0.8,
@@ -178,7 +175,6 @@ class Yala(object):
 
             # Update sampler attributes
             self.server.pattern_mask = self.firing_graph
-            self.server.pattern_backward = None
             self.server.sax_mask_forward = None
             self.sampler.patterns = None
 

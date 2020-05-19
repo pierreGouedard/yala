@@ -1,14 +1,13 @@
 # Global import
 import os
 import pandas as pd
-import json
 
 # Local import
 from settings import models_path, features_path, export_path
-from sklearn.model_selection import train_test_split
 from src.dev.names import KVName
 from src.tools.ams_metric import embedded_ams
 from src.dev.prediction import ClassifierSelector
+from src.tools.ams_metric import AMS_metric
 
 # Declare input and outputs
 inputs = {
@@ -66,13 +65,6 @@ solution_path = os.path.join(outputs['solution']['path'], outputs['solution']['n
 df_train = pd.read_csv(os.path.join(inputs['train']['path'], inputs['train']['name']), index_col='EventId')
 df_weights = pd.read_csv(os.path.join(inputs['weights']['path'], inputs['weights']['name']), index_col="EventId")
 
-# TODO:
-#   * Add possibility of drop out at each iteration.
-#   * Try to predict both 0 and 1 and see how it competes.
-#   * Think of the regressor and test it on house prices challenge.
-#   * Think of selecting more that 1 at a time ( theoretically justify once and for all that there is either a gain in
-#     complexity or in efficiency.
-
 
 cs = ClassifierSelector(
     df_data=df_train,
@@ -113,3 +105,9 @@ df_solution = pd.merge(cs.fold_manager.df_test['target'], df_weights, left_index
     .to_csv(solution_path, index=None)
 
 
+path_submission = os.path.join(inputs['submission']['path'], inputs['submission']['name'])\
+    .format(KVName.from_dict(parameters).to_string())
+path_solution = os.path.join(inputs['solution']['path'], inputs['solution']['name'])\
+    .format(KVName.from_dict(parameters).to_string())
+
+AMS_metric(path_solution, path_submission)
