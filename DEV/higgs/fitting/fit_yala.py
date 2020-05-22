@@ -45,9 +45,9 @@ params_folds = {
 }
 
 params_yala = {
-    'sampling_rate': 0.5, 'n_sampling': 1, 'max_iter': 100, 'learning_rate': 1e-2, 'batch_size': 100000,
+    'sampling_rate': 0.5, 'n_sampling': 1, 'max_iter': 100, 'learning_rate': 1e-2, 'batch_size': 150000,
     'drainer_batch_size': 30000, 'min_firing': 1000, 'min_precision': 0.8, 'max_precision': 0.99, 'max_retry': 5,
-    'dropout_vertex': 0.7, 'dropout_mask': 0.7
+    'dropout_vertex': 0.05, 'dropout_mask': 0.3
 }
 params_yala_grid = {}
 params_encoding = {
@@ -104,10 +104,4 @@ df_solution = pd.merge(cs.fold_manager.df_test['target'], df_weights, left_index
     .loc[:, ['EventId', 'Class', 'Weight']] \
     .to_csv(solution_path, index=None)
 
-
-path_submission = os.path.join(inputs['submission']['path'], inputs['submission']['name'])\
-    .format(KVName.from_dict(parameters).to_string())
-path_solution = os.path.join(inputs['solution']['path'], inputs['solution']['name'])\
-    .format(KVName.from_dict(parameters).to_string())
-
-AMS_metric(path_solution, path_submission)
+AMS_metric(solution_path, submission_path)

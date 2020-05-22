@@ -176,6 +176,7 @@ class Yala(object):
             # Update sampler attributes
             self.server.pattern_mask = self.firing_graph
             self.server.sax_mask_forward = None
+            self.server.pattern_backward = None
             self.sampler.patterns = None
 
         self.firing_graph.augment(l_dropouts)
