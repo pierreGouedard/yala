@@ -105,7 +105,7 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
 
 
 def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
-                                   overlap_rate, min_precision, max_precision):
+                                   overlap, min_precision, max_precision, min_gain):
     """
 
     :param server:
@@ -114,7 +114,7 @@ def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph,
     :param drainer_params:
     :param ax_weights:
     :param min_firing:
-    :param overlap_rate:
+    :param overlap:
     :param min_precision:
     :param max_precision:
     :return:
@@ -133,10 +133,10 @@ def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph,
         # Specify keyword args for selection
         kwargs = {
             'weight': ax_weights[v], 'p': drainer_params['p'][v], 'r': drainer_params['r'][v],
-            "min_precision": min_precision, 'max_precision': max_precision
+            "min_precision": min_precision, 'max_precision': max_precision, 'min_gain': min_gain
         }
         l_new, l_selected_ = disclose_patterns(
-            sax_i, l_selected_sub, l_partition_sub, firing_graph, overlap_rate, min_firing, **kwargs
+            sax_i, l_selected_sub, l_partition_sub, firing_graph, overlap, min_firing, **kwargs
         )
 
         # Update output mapping
@@ -158,7 +158,7 @@ def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph,
     return sorted(l_new, key=lambda p: p.index_output), l_selected
 
 
-def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap_rate, min_firing, **kwargs):
+def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, min_firing, **kwargs):
     """
 
     :param X:
@@ -198,7 +198,7 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap_rat
         # Update variables
         sax_selected[:, n] = sax_candidate[:, d_score['index_output']] > 0
         ax_is_selected[n] = (not d_score.get('is_new', True) or d_score['precision'] > kwargs['max_precision'])
-        ax_is_distinct = update_overlap_mask(sax_selected, sax_candidate, overlap_rate, min_firing)
+        ax_is_distinct = update_overlap_mask(sax_selected, sax_candidate, overlap)
 
         # Change index of output and add pattern
         l_patterns.append(YalaPredPattern.from_partition(
@@ -240,11 +240,14 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, **kwa
 
     # Extract input matrices and backward fire count of transient patterns
     sax_weight = firing_graph.Iw[:, ax_trans_indices]
-    sax_count = firing_graph.backward_firing['i'][:, ax_trans_indices.ravel()]
+    sax_count = firing_graph.backward_firing['i'][:, ax_trans_indices]
+    ax_levels = firing_graph.levels[ax_trans_indices]
+    ax_target_precisions = np.array([p.get('precision', 0) for p in l_partitions]) + kwargs['min_gain']
 
     # Compute precision of transient bits organize as its input matrix
     sax_trans = get_precision(
-        sax_weight.astype(float), sax_count.astype(float), kwargs['p'], kwargs['r'], kwargs['weight'], min_firing
+        sax_weight.astype(float), sax_count.astype(float), kwargs['p'], kwargs['r'], kwargs['weight'], min_firing,
+        ax_target_precisions
     )
 
     return build_pattern(sax_pred, l_precisions, sax_trans)
@@ -291,7 +294,8 @@ def build_pattern(sax_pred, l_precisions, sax_trans):
     return YalaPredPatterns.from_input_matrix(hstack(l_inputs), l_partitions)
 
 
-def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0):
+
+def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec):
     """
 
     :param drainer_params:
@@ -307,10 +311,13 @@ def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0):
         .multiply(sax_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc'))).power(-1))
     sax_precision += (sax_precision > 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
 
-    return sax_precision.multiply(sax_precision > 0)
+    # Get only precision mask that are larger than ax_prec
+    precision_mask = sax_precision > (sax_precision > 0).dot(diags(ax_prec, format='csc'))
+
+    return sax_precision.multiply(precision_mask)
 
 
-def update_overlap_mask(sax_base, sax_patterns, overlap_rate, min_firing):
+def update_overlap_mask(sax_base, sax_patterns, overlap):
     """
 
     :param sax_base:
@@ -320,10 +327,10 @@ def update_overlap_mask(sax_base, sax_patterns, overlap_rate, min_firing):
     """
     ax_diff = sax_patterns.astype(int).sum(axis=0) - \
         csc_matrix(sax_base.sum(axis=1)).transpose().astype(int).dot(sax_patterns)
-    return np.array(ax_diff)[0] > (1 - overlap_rate) * min_firing
+    return np.array(ax_diff)[0] > overlap
 
 
-def set_score_params(ax_phi_old, ax_phi_new, r_max=1000):
+def set_feedbacks(ax_phi_old, ax_phi_new, r_max=1000):
     """
 
     :param phi_old:
@@ -333,11 +340,17 @@ def set_score_params(ax_phi_old, ax_phi_new, r_max=1000):
     """
     ax_p, ax_r = np.zeros(ax_phi_new.shape), np.zeros(ax_phi_new.shape)
     for i, (phi_old, phi_new) in enumerate(zip(*[ax_phi_old, ax_phi_new])):
-        for r in range(r_max):
-            p = np.ceil(r * phi_old / (1 - phi_old))
-            score = (phi_new * (p + r)) - p
-            if score > 0.:
-                ax_p[i], ax_r[i] = p, r
-                break
+        p, r = set_feedback(phi_old, phi_new, r_max)
+        ax_p[i], ax_r[i] = p, r
 
     return ax_p, ax_r
+
+
+def set_feedback(phi_old, phi_new, r_max=1000):
+    for r in range(r_max):
+        p = np.ceil(r * phi_old / (1 - phi_old))
+        score = (phi_new * (p + r)) - p
+        if score > 0.:
+            return p, r
+
+    raise ValueError("Not possible to find feedback values to distinguish {} and {}".format(phi_old, phi_new))

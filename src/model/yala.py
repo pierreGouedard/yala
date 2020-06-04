@@ -6,8 +6,8 @@ import numpy as np
 import time
 
 # Local import
-from .utils import build_firing_graph, disclose_patterns_multi_output, set_score_params, select_patterns
-from .patterns import YalaBasePattern, YalaPredPatterns
+from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks, select_patterns
+from .patterns import YalaBasePattern
 
 
 class Yala(object):
@@ -24,10 +24,10 @@ class Yala(object):
                  n_sampling=10,
                  max_iter=5,
                  max_retry=5,
-                 learning_rate=5e-2,
+                 min_gain=1e-3,
+                 margin=2e-2,
                  drainer_batch_size=500,
                  batch_size=1000,
-                 firing_graph=None,
                  min_firing=10,
                  min_precision=0.75,
                  max_precision=None,
@@ -42,15 +42,15 @@ class Yala(object):
         self.n_sampling = n_sampling
         self.max_iter = max_iter
         self.max_retry = max_retry
-        self.learning_rate = learning_rate
+        self.min_gain = min_gain
+        self.margin = margin
         self.min_precision = min_precision
-        self.overlap_rate = overlap_rate
         self.eval_score = init_eval_score
         self.dropout_vertex = dropout_vertex
         self.dropout_mask = dropout_mask
 
         if max_precision is None:
-            self.max_precision = 1 - self.learning_rate
+            self.max_precision = 1 - (2 * self.min_gain)
         else:
             self.max_precision = max_precision
 
@@ -58,9 +58,10 @@ class Yala(object):
         self.batch_size = batch_size
 
         # Core attributes
-        self.firing_graph = firing_graph
+        self.firing_graph = None
         self.drainer_params = {'t': -1}
         self.min_firing = min_firing
+        self.overlap = int(self.min_firing * (self.drainer_batch_size / self.batch_size) * overlap_rate)
         self.n_outputs, self.n_inputs = None, None
         self.server, self.sampler, self.drainer = None, None, None
 
@@ -75,11 +76,11 @@ class Yala(object):
         ax_precision = np.asarray(y.sum(axis=0) / y.shape[0])[0]
 
         # Get scoring process params
-        ax_p, ax_r = set_score_params(ax_precision + self.learning_rate, ax_precision + (2 * self.learning_rate))
+        ax_p, ax_r = set_feedbacks(ax_precision + self.min_gain, ax_precision + (2 * self.min_gain))
         ax_weight = ((ax_p - (ax_precision * (ax_p + ax_r))) * self.min_firing).astype(int) + 1
         self.drainer_params.update({'p': ax_p, 'r': ax_r})
 
-        return ax_precision + self.learning_rate, ax_weight
+        return ax_precision + self.min_gain, ax_weight
 
     def __core_parameters(self, l_patterns):
         """
@@ -89,15 +90,15 @@ class Yala(object):
         """
         # Set current precision for each structure
         ax_precision = np.array([p.precision for p in l_patterns])
-        ax_lower_precision = ax_precision + ((self.max_precision - ax_precision) / 2).clip(max=self.learning_rate)
-        ax_upper_precision = (ax_precision + (2 * self.learning_rate)).clip(max=self.max_precision)
+        ax_lower_precision = (ax_precision - (2 * self.margin)).clip(min=self.min_gain)
+        ax_upper_precision = (ax_precision - self.margin).clip(min=2 * self.min_gain)
 
         # Get corresponding reward / penalty and update drainer_params
-        ax_p, ax_r = set_score_params(ax_lower_precision, ax_upper_precision)
-        ax_weights = ((ax_p - (ax_precision * (ax_p + ax_r))) * self.min_firing).astype(int) + 1
+        ax_p, ax_r = set_feedbacks(ax_lower_precision, ax_upper_precision)
+        ax_weights = ((ax_p - (ax_lower_precision * (ax_p + ax_r))) * self.min_firing).astype(int) + 1
         self.drainer_params.update({'p': ax_p, 'r': ax_r})
 
-        return ax_lower_precision.round(3), ax_weights
+        return ax_upper_precision.round(3), ax_weights
 
     def fit(self, X, y, eval_set=None, sample_weight=None):
         """row
@@ -113,7 +114,7 @@ class Yala(object):
         self.n_inputs, self.n_outputs = X.shape[1], y.shape[1]
         self.batch_size = min(y.shape[0], self.batch_size)
         self.drainer_batch_size = min(y.shape[0], self.drainer_batch_size)
-        self.sampler = SupervisedSampler(self.server, self.batch_size, self.sampling_rate, self.n_sampling)
+        self.sampler = SupervisedSampler(self.server, self.drainer_batch_size, self.sampling_rate, self.n_sampling)
 
         # Core loop
         count_no_update, l_dropouts = 0, []
@@ -142,7 +143,7 @@ class Yala(object):
                 # Disclose new patterns
                 self.sampler.patterns, l_selected = disclose_patterns_multi_output(
                     l_selected, self.server, self.drainer_batch_size, firing_graph, self.drainer_params, ax_weights,
-                    self.min_firing, self.overlap_rate, self.min_precision, self.max_precision
+                    self.min_firing, self.overlap, self.min_precision, self.max_precision, self.min_gain
                 )
 
                 stop = (len(self.sampler.patterns) == 0)
