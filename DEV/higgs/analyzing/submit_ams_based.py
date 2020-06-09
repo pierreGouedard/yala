@@ -7,7 +7,7 @@ import time
 # Local import
 from settings import models_path, features_path, submission_path
 from src.dev.names import KVName
-from src.tools.ams_metric import AMS_metric
+from src.tools.ams_metric import AMS
 
 # Declare input and outputs
 inputs = {
@@ -35,7 +35,9 @@ with open(os.path.join(inputs['model']['path'], inputs['model']['name']).format(
 # Load test features
 df_test = pd.read_csv(os.path.join(inputs['test']['path'], inputs['test']['name']), index_col="EventId")
 
-df_probas = classifier.predict_proba(df_test)
+
+df_probas = classifier.predict_proba(df_test, ax_weights, AMS)
+
 
 df_probas = df_probas.loc[:, 's']\
         .sort_values(ascending=False)\

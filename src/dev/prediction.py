@@ -349,6 +349,27 @@ class Classifier(object):
 
         return pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_)
 
+    def predict_score(self, df, scoring, ax_weights):
+        """
+        Predict probabilities over target space for feature in df.
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+
+        Returns
+        -------
+
+        """
+        features = self.feature_builder.transform(df)
+        preds = self.model_classification.predict_score(features, scoring, ax_weights)
+
+        if self.feature_builder.target_transform == 'sparse_encoding':
+            df_probas = pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_[[1]])
+            return df_probas
+
+        return pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_)
+
     def evaluate(self, df_train, df_test):
         """
         Compute different metrics for evaluation of the current classifier performance using labelled data set.

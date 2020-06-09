@@ -34,7 +34,8 @@ class Yala(object):
                  overlap_rate=0.5,
                  init_eval_score=0,
                  dropout_vertex=0.2,
-                 dropout_mask=0.2
+                 dropout_mask=0.2,
+                 max_candidate=100
                  ):
 
         # Core parameter of the algorithm
@@ -48,6 +49,7 @@ class Yala(object):
         self.eval_score = init_eval_score
         self.dropout_vertex = dropout_vertex
         self.dropout_mask = dropout_mask
+        self.max_candidate = max_candidate
 
         if max_precision is None:
             self.max_precision = 1 - (2 * self.min_gain)
@@ -143,9 +145,11 @@ class Yala(object):
                 # Disclose new patterns
                 self.sampler.patterns, l_selected = disclose_patterns_multi_output(
                     l_selected, self.server, self.drainer_batch_size, firing_graph, self.drainer_params, ax_weights,
-                    self.min_firing, self.overlap, self.min_precision, self.max_precision, self.min_gain
+                    self.min_firing, self.overlap, self.min_precision, self.max_precision, self.min_gain,
+                    self.max_candidate
                 )
 
+                print("[YALA]: {} pattern disclosed".format(len(self.sampler.patterns)))
                 stop = (len(self.sampler.patterns) == 0)
 
                 if not stop:
@@ -153,13 +157,13 @@ class Yala(object):
                     # update parameters
                     ax_precision, ax_weights = self.__core_parameters(self.sampler.patterns)
 
-                    print("[YALA]: {} pattern updated, targeted precision are {}".format(
-                        len(self.sampler.patterns), ax_precision)
-                    )
-
                     # Sample
                     firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), ax_weights)
                     n += 1
+
+                    print("[YALA]: {} pattern updated, targeted precision are {}".format(
+                        len(self.sampler.patterns), ax_precision)
+                    )
 
             # Filter selected vertices with eval_set
             self.firing_graph, l_dropouts = select_patterns(
@@ -214,3 +218,27 @@ class Yala(object):
             ax_probas_all[:, [partition['index_output']]] += (ax_probas / len(self.firing_graph.partitions))
 
         return ax_probas_all
+
+    def predict_score(self, X, scoring, ax_weights, min_score=0):
+        """
+
+        :param X:
+        :return:
+        """
+        assert self.firing_graph is not None, "First fit firing graph"
+        ax_scores_all = np.zeros((X.shape[0], self.firing_graph.O.shape[1]))
+
+        for i, partition in enumerate(self.firing_graph.partitions):
+            base_pattern = YalaBasePattern.from_partition(partition, self.firing_graph)
+            ax_activations = base_pattern.propagate_np(X)
+
+            import IPython
+            IPython.embed()
+
+            signal = int(ax_activations.mutliply(ax_weights) * base_pattern.precision)
+            background = int(ax_activations.mutliply(ax_weights) - signal)
+
+            ax_scores = (ax_activations * scoring(signal, background)).clip(min=min_score)
+            ax_scores_all[:, [partition['index_output']]] += (ax_scores / len(self.firing_graph.partitions))
+
+        return ax_scores_all

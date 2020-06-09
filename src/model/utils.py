@@ -69,8 +69,6 @@ def select_patterns(l_selected, l_dropouts, firing_graph, X, dropout_rate=0.2):
     else:
         l_selected_new, l_dropouts_new = l_selected + l_dropouts + l_selected_old, []
 
-    print(len(l_dropouts_new))
-    print(len(l_selected_new))
     firing_graph = YalaPredPatterns.from_pred_patterns(l_base_patterns=l_selected_new)
 
     return firing_graph, l_dropouts_new
@@ -105,7 +103,7 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
 
 
 def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
-                                   overlap, min_precision, max_precision, min_gain):
+                                   overlap, min_precision, max_precision, min_gain, max_candidate):
     """
 
     :param server:
@@ -133,7 +131,8 @@ def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph,
         # Specify keyword args for selection
         kwargs = {
             'weight': ax_weights[v], 'p': drainer_params['p'][v], 'r': drainer_params['r'][v],
-            "min_precision": min_precision, 'max_precision': max_precision, 'min_gain': min_gain
+            "min_precision": min_precision, 'max_precision': max_precision, 'min_gain': min_gain,
+            "max_candidate": max_candidate
         }
         l_new, l_selected_ = disclose_patterns(
             sax_i, l_selected_sub, l_partition_sub, firing_graph, overlap, min_firing, **kwargs
@@ -250,10 +249,10 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, **kwa
         ax_target_precisions
     )
 
-    return build_pattern(sax_pred, l_precisions, sax_trans)
+    return build_pattern(sax_pred, l_precisions, sax_trans, kwargs['max_candidate'])
 
 
-def build_pattern(sax_pred, l_precisions, sax_trans):
+def build_pattern(sax_pred, l_precisions, sax_trans, max_candidate):
     """
 
     :param sax_pred_I:
@@ -265,20 +264,26 @@ def build_pattern(sax_pred, l_precisions, sax_trans):
     l_inputs, n_pred = [sax_pred], len(l_precisions)
     for i in range(sax_trans.shape[1]):
 
-        # Get each non zero entry in a single columns
-        sax_split_trans = diags(sax_trans[:, i].A.ravel(), format='csc')[:, sax_trans[:, i].nonzero()[0]]
+        sax_cand = sax_trans[:, i]
 
-        if sax_split_trans.nnz == 0:
+        if sax_cand.nnz > max_candidate:
+            sax_cand.data[sax_cand.data.argsort()[:sax_cand.nnz - max_candidate]] = 0
+            sax_cand.eliminate_zeros()
+
+        # Get each non zero entry in a single columns
+        sax_split_cand = diags(sax_cand.A.ravel(), format='csc')[:, sax_cand.nonzero()[0]]
+
+        if sax_split_cand.nnz == 0:
             continue
 
         # Append list of precision
-        l_precisions.extend(list(sax_split_trans.sum(axis=0).A[0]))
+        l_precisions.extend(list(sax_split_cand.sum(axis=0).A[0]))
 
         # Build input matrix of candidate predictor and add it to list
-        sax_I = (sax_split_trans > 0)
+        sax_I = (sax_split_cand > 0)
 
         if sax_pred.shape[1] > 0:
-            sax_I += sax_pred[:, np.ones(sax_split_trans.shape[1], dtype=int) * i]
+            sax_I += sax_pred[:, np.ones(sax_split_cand.shape[1], dtype=int) * i]
 
         l_inputs.append(sax_I)
 
@@ -292,7 +297,6 @@ def build_pattern(sax_pred, l_precisions, sax_trans):
     ])
 
     return YalaPredPatterns.from_input_matrix(hstack(l_inputs), l_partitions)
-
 
 
 def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec):
