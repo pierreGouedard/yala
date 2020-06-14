@@ -32,7 +32,7 @@ class ClassifierSelector(object):
 
     def __init__(self, df_data, model_classification, params_features, params_features_grid, params_mdl,
                  params_mdl_grid, params_fold, scoring, df_weights=None, weight_arg='sample_weight',
-                 path_backup=None):
+                 scoring_arg='scoring', path_backup=None):
         """
 
         Parameters
@@ -68,7 +68,7 @@ class ClassifierSelector(object):
         # Core parameter classifier
         self.model_classification = model_classification
         self.scoring = scoring
-        self.weight_arg = weight_arg
+        self.weight_arg, self.scoring_arg = weight_arg, scoring_arg
 
         # Parameters of models builder and model
         self.params_features = params_features
@@ -208,8 +208,11 @@ class ClassifierSelector(object):
         if 'input_shape' in args.keys():
             args['input_shape'] = d_train['X'].shape[1]
 
-        if 'w' in d_train.keys():
+        if d_train.get('w', None) is not None:
             args[self.weight_arg] = d_train['w']
+
+        if d_train.get('s', None) is not None:
+            args[self.scoring_arg] = d_train['s']
 
         if d_eval is not None:
             args['eval_set'] = d_eval
@@ -349,7 +352,7 @@ class Classifier(object):
 
         return pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_)
 
-    def predict_score(self, df, scoring, ax_weights):
+    def predict_score(self, df):
         """
         Predict probabilities over target space for feature in df.
 
@@ -362,7 +365,7 @@ class Classifier(object):
 
         """
         features = self.feature_builder.transform(df)
-        preds = self.model_classification.predict_score(features, scoring, ax_weights)
+        preds = self.model_classification.predict_score(features)
 
         if self.feature_builder.target_transform == 'sparse_encoding':
             df_probas = pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_[[1]])

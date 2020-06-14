@@ -1,6 +1,6 @@
 # Global imports
 import numpy as np
-from scipy.sparse import lil_matrix, eye
+from scipy.sparse import lil_matrix, eye, diags
 
 # Local import
 from firing_graph.core.data_structure.graph import FiringGraph
@@ -65,7 +65,7 @@ class YalaBasePattern(FiringGraph):
         # Add kwargs
         kwargs = {
             'partitions': partition.get('partitions', None), 'precision': partition.get('precision', None),
-            'ax_levels': ax_levels, 'matrices': d_matrices
+            'ax_levels': ax_levels, 'matrices': d_matrices, 'score': partition.get('score', None)
         }
 
         if add_backward_firing:
@@ -101,13 +101,14 @@ class YalaBasePattern(FiringGraph):
         self.n_outputs = n_outputs if n_outputs is not None else self.n_outputs
 
         # Change Output matrices
-        self.matrices['Ow'] = lil_matrix((1, self.n_outputs))
-        self.matrices['Ow'][0, index_output] = 1
+        sax_Ow = lil_matrix((1, self.n_outputs))
+        sax_Ow[0, index_output] = 1
+        self.matrices['Ow'] = sax_Ow.tocsc()
 
         # Change output mask
         sax_Om = lil_matrix((1, self.n_outputs))
         sax_Om[0, index_output] = self.matrices['Om'][0, self.index_output]
-        self.matrices['Om'] = sax_Om
+        self.matrices['Om'] = sax_Om.tocsc()
 
         # Change index output
         self.index_output = index_output
@@ -373,7 +374,8 @@ class YalaPredPatterns(FiringGraph):
                 'indices': [n_core],
                 'depth': pattern.depth,
                 'index_output': pattern.index_output,
-                'precision': pattern.precision
+                'precision': pattern.precision,
+                'score': pattern.score
             })
 
             # Augment matrices and levels
@@ -425,7 +427,8 @@ class YalaPredPatterns(FiringGraph):
                 'indices': [n_core],
                 'depth': pattern.depth,
                 'index_output': pattern.index_output,
-                'precision': pattern.precision
+                'precision': pattern.precision,
+                'score': pattern.score
             })
 
             # Augment matrices and levels
@@ -434,6 +437,39 @@ class YalaPredPatterns(FiringGraph):
             n_core += 1
 
         return self
+
+    def expand_outputs(self):
+
+        # Get new n_outputs if specified
+        self.n_outputs = len(self.partitions)
+
+        # Change Output matrices
+        self.matrices['Ow'] = diags(np.ones(self.n_outputs), format='csc')
+
+        # Change output mask
+        self.matrices['Om'] = diags(np.ones(self.n_outputs), format='csc')
+
+        return self
+
+    def contract_outputs(self):
+
+        l_outputs = list(set([p['index_output'] for p in self.partitions]))
+
+        if self.O.shape[1] == len(l_outputs):
+            return
+
+        # Get new n_outputs if specified
+        self.n_outputs = len(l_outputs)
+
+        # Change Output matrices
+        sax_Ow = lil_matrix((len(self.partitions), len(l_outputs)))
+        sax_Om = lil_matrix((self.n_outputs, self.n_outputs))
+        for i in l_outputs:
+            sax_Ow[[p['index_output'] for p in self.partitions if p['index_output'] == i], i] = 1
+            sax_Om[[p['index_output'] for p in self.partitions if p['index_output'] == i], i] = True
+
+        self.matrices['Ow'] = sax_Ow.tocsc()
+        self.matrices['Om'] = sax_Om.tocsc()
 
     def copy(self):
 

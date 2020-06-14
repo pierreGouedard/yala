@@ -1,11 +1,9 @@
 # Global import
 import os
 import pandas as pd
-import json
 
 # Local import
 from settings import models_path, features_path, export_path
-from sklearn.model_selection import train_test_split
 from src.dev.names import KVName
 from src.tools.ams_metric import embedded_ams
 from src.dev.prediction import ClassifierSelector
@@ -30,7 +28,8 @@ parameters = {
 params_folds = {
     'nb_folds': 2,
     'method': 'standard',
-    'test_size': 0.2,
+    "scoring": embedded_ams,
+    'test_size': 0.01,
     'params_builder': {
         'method': 'cat_num_encode',
         'num_cols': [
@@ -47,10 +46,11 @@ params_folds = {
 }
 
 params_yala = {
-    'sampling_rate': 1.0, 'n_sampling': 100, 'max_iter': 100, 'min_gain': 1e-3, 'batch_size': 100000,
-    'drainer_batch_size': 30000, 'min_firing': 800, 'min_precision': 0.8, 'max_retry': 5,
-    'dropout_vertex': 0.7, 'dropout_mask': 0.7, "max_candidate": 100
+    'sampling_rate': 1.0, 'n_sampling': 1, 'max_iter': 100, 'min_gain': 1e-3, 'batch_size': 150000,
+    'drainer_batch_size': 30000, 'min_firing': 800, 'min_precision': 0.86, 'max_retry': 5,
+    'dropout_vertex': 0.1, 'dropout_mask': 0.9, "max_candidate": 100
 }
+
 params_yala_grid = {}
 params_encoding = {
     'params_num_enc': {'n_bins': 20, 'method': 'signal'},

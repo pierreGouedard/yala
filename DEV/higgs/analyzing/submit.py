@@ -22,7 +22,7 @@ outputs = {
 parameters = {
     'model': 'yala',
     'treshold': 0.8,
-    'id': 1#int(time.process_time()*1000)
+    'id': 10#int(time.process_time()*1000)
 
 }
 
@@ -35,7 +35,10 @@ with open(os.path.join(inputs['model']['path'], inputs['model']['name']).format(
 # Load test features
 df_test = pd.read_csv(os.path.join(inputs['test']['path'], inputs['test']['name']), index_col="EventId")
 
+import time
+t0 = time.time()
 df_probas = classifier.predict_proba(df_test)
+print('duration predict {}'.format(time.time() - t0))
 
 df_probas = df_probas.loc[:, 's']\
         .sort_values(ascending=False)\
@@ -46,7 +49,6 @@ df_probas = df_probas.loc[:, 's']\
         ) \
         .reset_index() \
         .loc[:, ['EventId', 'RankOrder', 'Class']]
-
 
 for t in [0.12, 0.13, 0.14, 0.15, 0.16, 0.17]:
     parameters['treshold'] = t

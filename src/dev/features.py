@@ -15,10 +15,11 @@ class FoldManager(object):
     """
     allowed_methods = ['standard', 'stratified']
     def __init__(self, df_data, params_builder, nb_folds, df_weights=None, method='standard', test_size=0.2,
-                 use_eval_set=False, eval_function=None, eval_size=0.1, target_name='target'):
+                 use_eval_set=False, eval_function=None, scoring=None, eval_size=0.1, target_name='target'):
 
-        # Get base parmeters
+        # Get base parameters
         self.target_name, self.use_eval_set, self.eval_function = target_name, use_eval_set, eval_function
+        self.scoring = scoring
 
         # Split data set into a train / test and Validation if necessary
         self.df_train, self.df_test = train_test_split(df_data, test_size=test_size, shuffle=True)
@@ -77,7 +78,7 @@ class FoldManager(object):
         X, y = self.feature_builder.transform(self.df_train, target=True)
 
         if self.df_weights is not None:
-            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_train.index].values}
+            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_train.index].values, 's': self.scoring}
 
         return {"X": X, "y": y}
 
@@ -135,7 +136,7 @@ class FoldManager(object):
         X, y = self.feature_builder.transform(self.df_test, target=True)
 
         if self.df_weights is not None:
-            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_test.index].values}
+            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_test.index].values, 's': self.scoring}
 
         return {"X": X, "y": y}
 

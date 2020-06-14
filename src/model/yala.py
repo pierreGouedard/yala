@@ -6,7 +6,7 @@ import numpy as np
 import time
 
 # Local import
-from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks, select_patterns
+from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks, select_patterns, refine_precision
 from .patterns import YalaBasePattern
 
 
@@ -102,7 +102,7 @@ class Yala(object):
 
         return ax_upper_precision.round(3), ax_weights
 
-    def fit(self, X, y, eval_set=None, sample_weight=None):
+    def fit(self, X, y, eval_set=None, scoring=None, sample_weight=None):
         """row
 
         :param X:
@@ -165,6 +165,8 @@ class Yala(object):
                         len(self.sampler.patterns), ax_precision)
                     )
 
+            l_selected = refine_precision(X, y, l_selected, weights=sample_weight, scoring=scoring)
+
             # Filter selected vertices with eval_set
             self.firing_graph, l_dropouts = select_patterns(
                 l_selected, l_dropouts, self.firing_graph, X, self.dropout_vertex
@@ -210,35 +212,43 @@ class Yala(object):
         :return:
         """
         assert self.firing_graph is not None, "First fit firing graph"
-        ax_probas_all = np.zeros((X.shape[0], self.firing_graph.O.shape[1]))
 
-        for i, partition in enumerate(self.firing_graph.partitions):
-            base_pattern = YalaBasePattern.from_partition(partition, self.firing_graph)
-            ax_probas = (base_pattern.propagate_np(X) * base_pattern.precision).clip(min=min_probas)
-            ax_probas_all[:, [partition['index_output']]] += (ax_probas / len(self.firing_graph.partitions))
+        # Get probas
+        ax_probas = np.array(
+            [p['precision'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
+        )
 
-        return ax_probas_all
+        # Propagate through the firing graph
+        ax_activations = self.firing_graph.expand_outputs().propagate(X).A
 
-    def predict_score(self, X, scoring, ax_weights, min_score=0):
+        # What in case of mutli outputs
+        ax_probas = (ax_activations * ax_probas).clip(min=min_probas)
+
+        # contract back outputs
+        self.firing_graph.contract_outputs()
+
+        return ax_probas.mean(axis=1)
+
+    def predict_score(self, X, min_score=0):
         """
 
         :param X:
         :return:
         """
         assert self.firing_graph is not None, "First fit firing graph"
-        ax_scores_all = np.zeros((X.shape[0], self.firing_graph.O.shape[1]))
 
-        for i, partition in enumerate(self.firing_graph.partitions):
-            base_pattern = YalaBasePattern.from_partition(partition, self.firing_graph)
-            ax_activations = base_pattern.propagate_np(X)
+        # Get probas
+        ax_scores = np.array(
+            [p['score'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
+        )
 
-            import IPython
-            IPython.embed()
+        # Propagate through the firing graph
+        ax_activations = self.firing_graph.expand_outputs().propagate(X).A
 
-            signal = int(ax_activations.mutliply(ax_weights) * base_pattern.precision)
-            background = int(ax_activations.mutliply(ax_weights) - signal)
+        # What in case of mutli outputs
+        ax_scores = (ax_activations * ax_scores).clip(min=min_score)
 
-            ax_scores = (ax_activations * scoring(signal, background)).clip(min=min_score)
-            ax_scores_all[:, [partition['index_output']]] += (ax_scores / len(self.firing_graph.partitions))
+        # contract back outputs
+        self.firing_graph.contract_outputs()
 
-        return ax_scores_all
+        return ax_scores.mean(axis=1)

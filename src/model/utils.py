@@ -48,6 +48,16 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
     return firing_graph
 
 
+def refine_precision(X, y, l_selected, weights=None, scoring=None):
+    for p in l_selected:
+        ax_activation = p.propagate(X).A[:, p.index_output]
+        p.precision = ax_activation.astype(int).dot(y.A[:, 0]) / ax_activation.sum()
+        if weights is not None and scoring is not None:
+            p.score = scoring(ax_activation, y, weights)
+
+    return l_selected
+
+
 def select_patterns(l_selected, l_dropouts, firing_graph, X, dropout_rate=0.2):
 
     l_selected_old = []
@@ -70,6 +80,8 @@ def select_patterns(l_selected, l_dropouts, firing_graph, X, dropout_rate=0.2):
         l_selected_new, l_dropouts_new = l_selected + l_dropouts + l_selected_old, []
 
     firing_graph = YalaPredPatterns.from_pred_patterns(l_base_patterns=l_selected_new)
+
+    assert all([p.score is not None for p in l_selected_new + l_dropouts_new]), 'Score of pattern lost !'
 
     return firing_graph, l_dropouts_new
 
@@ -206,15 +218,15 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, mi
         n += 1
 
     # Compute normalized precision
-    ax_norm_precision = get_normalized_precision(
-        sax_selected[:, :n].tocsc(), np.array([pat.precision for pat in l_patterns]),
-        ax_is_selected[:n]
-    )
+    # ax_norm_precision = get_normalized_precision(
+    #     sax_selected[:, :n].tocsc(), np.array([pat.precision for pat in l_patterns]),
+    #     ax_is_selected[:n]
+    # )
 
     #
     l_new = [p for i, p in enumerate(l_patterns) if not ax_is_selected[i]]
     l_selected = [pat for i, pat in enumerate(l_patterns) if ax_is_selected[i]]
-    l_selected = [p for i, p in enumerate(l_selected) if ax_norm_precision[i] > kwargs['min_precision']]
+    #l_selected = [p for i, p in enumerate(l_selected) if ax_norm_precision[i] > kwargs['min_precision']]
 
     return l_new, l_selected
 
@@ -240,7 +252,6 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, **kwa
     # Extract input matrices and backward fire count of transient patterns
     sax_weight = firing_graph.Iw[:, ax_trans_indices]
     sax_count = firing_graph.backward_firing['i'][:, ax_trans_indices]
-    ax_levels = firing_graph.levels[ax_trans_indices]
     ax_target_precisions = np.array([p.get('precision', 0) for p in l_partitions]) + kwargs['min_gain']
 
     # Compute precision of transient bits organize as its input matrix
@@ -252,16 +263,17 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, **kwa
     return build_pattern(sax_pred, l_precisions, sax_trans, kwargs['max_candidate'])
 
 
-def build_pattern(sax_pred, l_precisions, sax_trans, max_candidate):
+def build_pattern(sax_I, l_prec, sax_trans, max_candidate):
     """
 
-    :param sax_pred_I:
-    :param l_precs:
-    :param sax_transient_prec:
+    :param sax_I:
+    :param l_prec:
+    :param sax_trans:
+    :param max_candidate:
     :return:
     """
     # build candidate input matrix
-    l_inputs, n_pred = [sax_pred], len(l_precisions)
+    l_inputs, l_updated, l_prec_new = [], [], []
     for i in range(sax_trans.shape[1]):
 
         sax_cand = sax_trans[:, i]
@@ -277,26 +289,28 @@ def build_pattern(sax_pred, l_precisions, sax_trans, max_candidate):
             continue
 
         # Append list of precision
-        l_precisions.extend(list(sax_split_cand.sum(axis=0).A[0]))
+        l_prec_new.extend(list(sax_split_cand.sum(axis=0).A[0]))
 
         # Build input matrix of candidate predictor and add it to list
-        sax_I = (sax_split_cand > 0)
+        sax_I_new = (sax_split_cand > 0)
 
-        if sax_pred.shape[1] > 0:
-            sax_I += sax_pred[:, np.ones(sax_split_cand.shape[1], dtype=int) * i]
+        if sax_I.shape[1] > 0:
+            sax_I_new += sax_I[:, np.ones(sax_split_cand.shape[1], dtype=int) * i]
 
-        l_inputs.append(sax_I)
+        l_inputs.append(sax_I_new)
+        l_updated.append(i)
+
+    # Remove previous pattern that has been updated
+    sax_I = sax_I[:, [i for i in range(sax_I.shape[1]) if i not in l_updated]]
+    l_prec = [p for i, p in enumerate(l_prec) if i not in l_updated]
 
     # build partition
-    l_partitions = [
-        {"indices": [i], "precision": p, "index_output": i, "is_new": False} for i, p in enumerate(l_precisions[:n_pred])
-    ]
-
+    l_partitions = [{"indices": [i], "precision": p, "index_output": i, "is_new": False} for i, p in enumerate(l_prec)]
     l_partitions.extend([
-        {"indices": [n_pred + i], "precision": p, "index_output": n_pred + i} for i, p in enumerate(l_precisions[n_pred:])
+        {"indices": [len(l_prec) + i], "precision": p, "index_output": len(l_prec) + i} for i, p in enumerate(l_prec_new)
     ])
 
-    return YalaPredPatterns.from_input_matrix(hstack(l_inputs), l_partitions)
+    return YalaPredPatterns.from_input_matrix(hstack([sax_I] + l_inputs), l_partitions)
 
 
 def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec):
