@@ -205,7 +205,7 @@ class Yala(object):
 
         return ax_preds
 
-    def predict_proba(self, X, min_probas=0.5):
+    def predict_proba(self, X, min_probas=0.5, min_count=100):
         """
 
         :param X:
@@ -220,14 +220,17 @@ class Yala(object):
 
         # Propagate through the firing graph
         ax_activations = self.firing_graph.expand_outputs().propagate(X).A
+        ax_activations[(ax_activations.sum(axis=1) < min_count)[:, np.newaxis] | ~ax_activations] = False
 
         # What in case of mutli outputs
-        ax_probas = (ax_activations * ax_probas).clip(min=min_probas)
+        ax_probas = (ax_activations * ax_probas)#.clip(min=min_probas)
+        ax_probas[ax_probas < 0.01] = np.nan
+        print(np.isnan(ax_probas).all())
 
         # contract back outputs
         self.firing_graph.contract_outputs()
 
-        return ax_probas.mean(axis=1)
+        return np.nanmean(ax_probas, axis=1)
 
     def predict_score(self, X, min_score=0):
         """

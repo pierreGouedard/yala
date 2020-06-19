@@ -348,7 +348,7 @@ class Classifier(object):
 
         if self.feature_builder.target_transform == 'sparse_encoding':
             df_probas = pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_[[1]])
-            return df_probas
+            return df_probas.fillna(0)
 
         return pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_)
 
