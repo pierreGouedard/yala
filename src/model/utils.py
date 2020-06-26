@@ -58,32 +58,36 @@ def refine_precision(X, y, l_selected, weights=None, scoring=None):
     return l_selected
 
 
-def select_patterns(l_selected, l_dropouts, firing_graph, X, dropout_rate=0.2):
+def select_patterns(l_selected, firing_graph, dropout_rate=0.2):
 
     l_selected_old = []
     if firing_graph is not None:
-        l_selected_old = [YalaPredPattern.from_partition(partition, firing_graph)
-                          for partition in firing_graph.partitions]
+        l_selected_old = [
+            YalaPredPattern.from_partition(partition, firing_graph) for partition in firing_graph.partitions
+        ]
+
+        # Augment firing graph with newly selected patterns
+        firing_graph = firing_graph.augment(l_selected, max([p['group_id'] for p in firing_graph.partitions]) + 1)
+
+    else:
+        firing_graph = YalaPredPatterns.from_pred_patterns(l_selected, group_id=0)
 
     # Merge firing graph
     if dropout_rate > 0:
 
         # Dropout patterns
-        l_candidates = l_selected + l_dropouts + l_selected_old
+        l_candidates = l_selected + l_selected_old
         l_dropout_indices = [i for i in range(len(l_candidates)) if np.random.binomial(1, dropout_rate)]
 
-        # Build lists
-        l_dropouts_new = [c for i, c in enumerate(l_candidates) if i in l_dropout_indices]
-        l_selected_new = [c for i, c in enumerate(l_candidates) if i not in l_dropout_indices]
+        # Build partial firing graph
+        partial_firing_graph = YalaPredPatterns.from_pred_patterns(
+            l_base_patterns=[c for i, c in enumerate(l_candidates) if i not in l_dropout_indices]
+        )
 
     else:
-        l_selected_new, l_dropouts_new = l_selected + l_dropouts + l_selected_old, []
+        partial_firing_graph = firing_graph
 
-    firing_graph = YalaPredPatterns.from_pred_patterns(l_base_patterns=l_selected_new)
-
-    assert all([p.score is not None for p in l_selected_new + l_dropouts_new]), 'Score of pattern lost !'
-
-    return firing_graph, l_dropouts_new
+    return firing_graph, partial_firing_graph
 
 
 def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):

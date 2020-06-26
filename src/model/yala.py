@@ -168,8 +168,8 @@ class Yala(object):
             l_selected = refine_precision(X, y, l_selected, weights=sample_weight, scoring=scoring)
 
             # Filter selected vertices with eval_set
-            self.firing_graph, l_dropouts = select_patterns(
-                l_selected, l_dropouts, self.firing_graph, X, self.dropout_vertex
+            self.firing_graph, partial_firing_graph = select_patterns(
+                l_selected, self.firing_graph, self.dropout_vertex
             )
 
             # Escape main loop on last retry condition
@@ -181,12 +181,10 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.pattern_mask = self.firing_graph
+            self.server.pattern_mask = partial_firing_graph
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
             self.sampler.patterns = None
-
-        self.firing_graph.augment(l_dropouts)
 
         return self
 
@@ -205,7 +203,7 @@ class Yala(object):
 
         return ax_preds
 
-    def predict_proba(self, X, min_probas=0.5, min_count=100):
+    def predict_proba(self, X, min_probas=0.7, has_groups=True):
         """
 
         :param X:
@@ -213,24 +211,31 @@ class Yala(object):
         """
         assert self.firing_graph is not None, "First fit firing graph"
 
-        # Get probas
-        ax_probas = np.array(
+        # Propagate through the firing graph assigned activation with correct proba
+        ax_prec = np.array(
             [p['precision'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
         )
-
-        # Propagate through the firing graph
         ax_activations = self.firing_graph.expand_outputs().propagate(X).A
-        ax_activations[(ax_activations.sum(axis=1) < min_count)[:, np.newaxis] | ~ax_activations] = False
-
-        # What in case of mutli outputs
-        ax_probas = (ax_activations * ax_probas)#.clip(min=min_probas)
-        ax_probas[ax_probas < 0.01] = np.nan
-        print(np.isnan(ax_probas).all())
-
-        # contract back outputs
+        ax_prec = (ax_activations * ax_prec)
         self.firing_graph.contract_outputs()
 
-        return np.nanmean(ax_probas, axis=1)
+        # Gather probas by group_id in partitions if necessary
+        if has_groups:
+            ax_prec[ax_prec == 0] = np.nan
+            l_group_ids = list(set([p['group_id'] for p in self.firing_graph.partitions]))
+            n, ax_probas = 0, np.zeros((ax_prec.shape[0], len(l_group_ids)))
+
+            for gid in l_group_ids:
+                l_indices = [p['indices'][0] for p in self.firing_graph.partitions if p['group_id'] == gid]
+                ax_probas[:, n] = np.nanmean(ax_prec[:, list(set(l_indices))], axis=1)
+                n += 1
+
+            ax_probas = np.nan_to_num(ax_probas, nan=min_probas).mean(axis=1)
+
+        else:
+            ax_probas = ax_prec.clip(min=min_probas).mean(axis=1)
+
+        return ax_probas
 
     def predict_score(self, X, min_score=0):
         """

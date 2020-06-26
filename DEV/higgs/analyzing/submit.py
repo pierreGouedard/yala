@@ -22,7 +22,7 @@ outputs = {
 parameters = {
     'model': 'yala',
     'treshold': 0.8,
-    'id': 12#int(time.process_time()*1000)
+    'id': 13#int(time.process_time()*1000)
 
 }
 
@@ -37,7 +37,10 @@ df_test = pd.read_csv(os.path.join(inputs['test']['path'], inputs['test']['name'
 
 import time
 t0 = time.time()
+import IPython
+IPython.embed()
 df_probas = classifier.predict_proba(df_test)
+
 print('duration predict {}'.format(time.time() - t0))
 
 df_probas = df_probas.loc[:, 's']\

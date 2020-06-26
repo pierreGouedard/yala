@@ -355,7 +355,7 @@ class YalaPredPatterns(FiringGraph):
             "Patterns of different depth inputed in YalaPredPatterns"
 
     @staticmethod
-    def from_pred_patterns(l_base_patterns):
+    def from_pred_patterns(l_base_patterns, group_id=None):
 
         if len(l_base_patterns) == 0:
             return None
@@ -375,7 +375,8 @@ class YalaPredPatterns(FiringGraph):
                 'depth': pattern.depth,
                 'index_output': pattern.index_output,
                 'precision': pattern.precision,
-                'score': pattern.score
+                'score': pattern.score,
+                'group_id': group_id
             })
 
             # Augment matrices and levels
@@ -411,7 +412,7 @@ class YalaPredPatterns(FiringGraph):
 
         return YalaPredPatterns(d_matrices['Iw'].shape[0], d_matrices['Ow'].shape[1], **kwargs)
 
-    def augment(self, l_base_patterns):
+    def augment(self, l_base_patterns, group_id=None):
 
         if len(l_base_patterns) == 0:
             return self
@@ -428,7 +429,8 @@ class YalaPredPatterns(FiringGraph):
                 'depth': pattern.depth,
                 'index_output': pattern.index_output,
                 'precision': pattern.precision,
-                'score': pattern.score
+                'score': pattern.score,
+                'group_id': group_id
             })
 
             # Augment matrices and levels

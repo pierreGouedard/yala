@@ -47,7 +47,7 @@ params_folds = {
 
 params_yala = {
     'sampling_rate': 1.0, 'n_sampling': 1, 'max_iter': 100, 'min_gain': 1e-3, 'batch_size': 150000,
-    'drainer_batch_size': 30000, 'min_firing': 800, 'min_precision': 0.86, 'max_retry': 5,
+    'drainer_batch_size': 30000, 'min_firing': 800, 'min_precision': 0.7, 'max_retry': 5,
     'dropout_vertex': 0.1, 'dropout_mask': 0.9, "max_candidate": 100
 }
 
