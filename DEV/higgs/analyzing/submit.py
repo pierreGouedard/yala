@@ -22,7 +22,7 @@ outputs = {
 parameters = {
     'model': 'yala',
     'treshold': 0.8,
-    'id': 13#int(time.process_time()*1000)
+    'id': 13#int(time.process_time() * 1000)
 
 }
 
@@ -39,7 +39,7 @@ import time
 t0 = time.time()
 import IPython
 IPython.embed()
-df_probas = classifier.predict_proba(df_test)
+df_probas = classifier.predict_score(df_test)
 
 print('duration predict {}'.format(time.time() - t0))
 
@@ -53,7 +53,7 @@ df_probas = df_probas.loc[:, 's']\
         .reset_index() \
         .loc[:, ['EventId', 'RankOrder', 'Class']]
 
-for t in [0.12, 0.13, 0.14, 0.15, 0.16, 0.17]:
+for t in [0.14, 0.15, 0.16]:
     parameters['treshold'] = t
     name_submission = '{}'.format(KVName.from_dict(parameters).to_string())
     submission_path = os.path.join(outputs['submission']['path'], outputs['submission']['name']).format(name_submission)

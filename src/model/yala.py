@@ -237,7 +237,7 @@ class Yala(object):
 
         return ax_probas
 
-    def predict_score(self, X, min_score=0):
+    def predict_score(self, X, min_score=0, has_groups=True):
         """
 
         :param X:
@@ -245,18 +245,26 @@ class Yala(object):
         """
         assert self.firing_graph is not None, "First fit firing graph"
 
-        # Get probas
-        ax_scores = np.array(
-            [p['score'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
-        )
-
-        # Propagate through the firing graph
+        # Propagate through the firing graph assigned activation with correct proba
+        ax_score = np.array([p['score'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])])
         ax_activations = self.firing_graph.expand_outputs().propagate(X).A
-
-        # What in case of mutli outputs
-        ax_scores = (ax_activations * ax_scores).clip(min=min_score)
-
-        # contract back outputs
+        ax_score = (ax_activations * ax_score)
         self.firing_graph.contract_outputs()
 
-        return ax_scores.mean(axis=1)
+        # Gather probas by group_id in partitions if necessary
+        if has_groups:
+            ax_score[ax_score == 0] = np.nan
+            l_group_ids = list(set([p['group_id'] for p in self.firing_graph.partitions]))
+            n, ax_probas = 0, np.zeros((ax_score.shape[0], len(l_group_ids)))
+
+            for gid in l_group_ids:
+                l_indices = [p['indices'][0] for p in self.firing_graph.partitions if p['group_id'] == gid]
+                ax_probas[:, n] = np.nanmean(ax_score[:, list(set(l_indices))], axis=1)
+                n += 1
+
+            ax_probas = np.nan_to_num(ax_probas, nan=min_score).mean(axis=1)
+
+        else:
+            ax_probas = ax_score.clip(min=min_score).mean(axis=1)
+
+        return ax_probas
