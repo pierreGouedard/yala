@@ -48,12 +48,14 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
     return firing_graph
 
 
-def refine_precision(X, y, l_selected, weights=None, scoring=None):
+def refine_precision(X, y, l_selected, weights=None, scoring=None, normalizer=None):
     for p in l_selected:
         ax_activation = p.propagate(X).A[:, p.index_output]
         p.precision = ax_activation.astype(int).dot(y.A[:, 0]) / ax_activation.sum()
         if weights is not None and scoring is not None:
-            p.score = scoring(ax_activation, y, weights)
+            if normalizer is not None:
+                weights_ = weights * (X.shape[0] / ax_activation.sum())
+            p.score = scoring(ax_activation, y, weights_)
 
     return l_selected
 
