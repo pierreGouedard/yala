@@ -25,20 +25,20 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
     l_patterns = []
     if sampler.patterns is None:
         for i in range(n_outputs):
-            # Add Empty base and sampled intersection into a yala structure
+            # Add Empty base and sampled intersection into a Yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
-                EmptyPattern(n_inputs, n_outputs, i),
-                YalaBasePattern.from_input_indices(n_inputs, n_outputs, i, sampler.samples[i], 1, ax_weights[i])
+                EmptyPattern(n_inputs, n_outputs, i, i),
+                YalaBasePattern.from_input_indices(n_inputs, n_outputs, i, i, sampler.samples[i], 1, ax_weights[i])
             ))
 
     else:
         for i, pattern in enumerate(sampler.patterns):
-            # Add Empty base and sampled intersection into a yala structure
+            # Add Empty base and sampled intersection into a Yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
                 pattern,
                 YalaBasePattern.from_input_indices(
-                    pattern.n_inputs, pattern.n_outputs, pattern.index_output, sampler.samples[i], 1,
-                    ax_weights[pattern.index_output]
+                    pattern.n_inputs, pattern.n_outputs, pattern.label_id, pattern.output_id, sampler.samples[i], 1,
+                    ax_weights[pattern.output_id]
                 )
             ))
 
@@ -50,7 +50,7 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
 
 def refine_precision(X, y, l_selected, weights=None, scoring=None):
     for p in l_selected:
-        ax_activation = p.propagate(X).A[:, p.index_output]
+        ax_activation = p.propagate(X).A[:, p.output_id]
         p.precision = ax_activation.astype(int).dot(y.A[:, 0]) / ax_activation.sum()
         if weights is not None and scoring is not None:
             p.score = scoring(ax_activation, y, weights * (X.shape[0] / ax_activation.sum()))
@@ -59,14 +59,13 @@ def refine_precision(X, y, l_selected, weights=None, scoring=None):
     return l_selected
 
 
-def select_patterns(l_selected, firing_graph, dropout_rate=0.2):
+def select_patterns(l_selected, firing_graph, dropout_rate=0.2, n_label=1):
 
     l_selected_old = []
     if firing_graph is not None:
         l_selected_old = [
-            YalaPredPattern.from_partition(partition, firing_graph) for partition in firing_graph.partitions
+            YalaPredPattern.from_partition(p, firing_graph) for p in firing_graph.partitions
         ]
-
         # Augment firing graph with newly selected patterns
         firing_graph = firing_graph.augment(l_selected, max([p['group_id'] for p in firing_graph.partitions]) + 1)
 
@@ -77,7 +76,7 @@ def select_patterns(l_selected, firing_graph, dropout_rate=0.2):
     if dropout_rate > 0:
 
         # Dropout patterns
-        l_candidates = l_selected + l_selected_old
+        l_candidates = [p.update_outputs(p.label_id, n_label) for p in l_selected + l_selected_old]
         l_dropout_indices = [i for i in range(len(l_candidates)) if np.random.binomial(1, dropout_rate)]
 
         # Build partial firing graph
@@ -139,17 +138,17 @@ def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph,
     for i, v in server.get_outputs().items():
 
         # get partition
-        l_partition_sub = [partition for partition in firing_graph.partitions if partition['index_output'] in v]
-        l_partition_sub = sorted(l_partition_sub, key=lambda p: p['index_output'])
+        l_partition_sub = [partition for partition in firing_graph.partitions if partition['label_id'] == i]
+        l_partition_sub = sorted(l_partition_sub, key=lambda p: p['output_id'])
 
         # Get already selected patterns for the output
-        l_selected_sub = [p for p in l_selected if p.index_output == i]
+        l_selected_sub = [p for p in l_selected if p.label_id == i]
 
         # Specify keyword args for selection
         kwargs = {
             'weight': ax_weights[v], 'p': drainer_params['p'][v], 'r': drainer_params['r'][v],
             "min_precision": min_precision, 'max_precision': max_precision, 'min_gain': min_gain,
-            "max_candidate": max_candidate
+            "max_candidate": max_candidate, 'label_id': i
         }
         l_new, l_selected_ = disclose_patterns(
             sax_i, l_selected_sub, l_partition_sub, firing_graph, overlap, min_firing, **kwargs
@@ -171,7 +170,7 @@ def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph,
         {k: [i for i, _ in l_pats] for k, l_pats in d_new.items()}
     )
 
-    return sorted(l_new, key=lambda p: p.index_output), l_selected
+    return l_new, l_selected
 
 
 def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, min_firing, **kwargs):
@@ -203,7 +202,7 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, mi
 
     n, l_patterns = 0, []
     for d_score in sorted(candidate_pattern.partitions, key=lambda x: x['precision'], reverse=True):
-        if not ax_is_distinct[d_score['index_output']]:
+        if not ax_is_distinct[d_score['output_id']]:
             continue
 
         # if target precision of a base pattern is not reached, drop the pattern
@@ -212,14 +211,12 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, mi
                 continue
 
         # Update variables
-        sax_selected[:, n] = sax_candidate[:, d_score['index_output']] > 0
+        sax_selected[:, n] = sax_candidate[:, d_score['output_id']] > 0
         ax_is_selected[n] = (not d_score.get('is_new', True) or d_score['precision'] > kwargs['max_precision'])
         ax_is_distinct = update_overlap_mask(sax_selected, sax_candidate, overlap)
 
         # Change index of output and add pattern
-        l_patterns.append(YalaPredPattern.from_partition(
-            d_score, candidate_pattern, index_output=l_partitions[0]['index_output']
-        ))
+        l_patterns.append(YalaPredPattern.from_partition(d_score, candidate_pattern, label_id=kwargs['label_id']))
         n += 1
 
     # Compute normalized precision
@@ -310,9 +307,9 @@ def build_pattern(sax_I, l_prec, sax_trans, max_candidate):
     l_prec = [p for i, p in enumerate(l_prec) if i not in l_updated]
 
     # build partition
-    l_partitions = [{"indices": [i], "precision": p, "index_output": i, "is_new": False} for i, p in enumerate(l_prec)]
+    l_partitions = [{"indices": [i], "precision": p, "output_id": i, "is_new": False} for i, p in enumerate(l_prec)]
     l_partitions.extend([
-        {"indices": [len(l_prec) + i], "precision": p, "index_output": len(l_prec) + i} for i, p in enumerate(l_prec_new)
+        {"indices": [len(l_prec) + i], "precision": p, "output_id": len(l_prec) + i} for i, p in enumerate(l_prec_new)
     ])
 
     return YalaPredPatterns.from_input_matrix(hstack([sax_I] + l_inputs), l_partitions)

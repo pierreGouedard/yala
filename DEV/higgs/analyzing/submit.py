@@ -37,8 +37,6 @@ df_test = pd.read_csv(os.path.join(inputs['test']['path'], inputs['test']['name'
 
 import time
 t0 = time.time()
-import IPython
-IPython.embed()
 df_probas = classifier.predict_score(df_test)
 
 print('duration predict {}'.format(time.time() - t0))
