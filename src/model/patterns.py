@@ -62,7 +62,7 @@ class YalaBasePattern(FiringGraph):
         # Set levels and output link
         ax_levels = firing_graph.levels[partition['indices']]
         d_matrices['Ow'] = d_matrices['Ow'].tolil()
-        d_matrices['Ow'][0, label_id] = 1
+        d_matrices['Ow'][0, output_id] = 1
 
         # Add kwargs
         kwargs = {
@@ -86,7 +86,7 @@ class YalaBasePattern(FiringGraph):
         # Set level and matrices
         ax_levels = np.array([l0])
         d_matrices['Iw'][l_inputs, 0] = weight
-        d_matrices['Ow'][0, label_id] = 1
+        d_matrices['Ow'][0, output_id] = 1
 
         # Update mask if necessary
         if enable_drain:
@@ -362,7 +362,7 @@ class YalaPredPatterns(FiringGraph):
             "Patterns of different depth inputed in YalaPredPatterns"
 
     @staticmethod
-    def from_pred_patterns(l_base_patterns, output_id=None):
+    def from_pred_patterns(l_base_patterns, group_id=None):
 
         if len(l_base_patterns) == 0:
             return None
@@ -383,7 +383,8 @@ class YalaPredPatterns(FiringGraph):
                 'precision': pattern.precision,
                 'score': pattern.score,
                 'label_id': pattern.label_id,
-                'output_id': pattern.output_id if output_id is None else output_id
+                'group_id': group_id,
+                'output_id': pattern.label_id
             })
 
             # Augment matrices and levels
@@ -419,7 +420,7 @@ class YalaPredPatterns(FiringGraph):
 
         return YalaPredPatterns(d_matrices['Iw'].shape[0], d_matrices['Ow'].shape[1], **kwargs)
 
-    def augment(self, l_base_patterns, output_id=None):
+    def augment(self, l_base_patterns, group_id=None):
 
         if len(l_base_patterns) == 0:
             return self
@@ -437,13 +438,47 @@ class YalaPredPatterns(FiringGraph):
                 'precision': pattern.precision,
                 'score': pattern.score,
                 'label_id': pattern.label_id,
-                'output_id': pattern.output_id if output_id is None else output_id
+                'group_id': group_id,
+                'output_id': pattern.label_id
+
             })
 
             # Augment matrices and levels
             self.matrices = augment_matrices(self.matrices, pattern.matrices, write_mode=False)
             self.levels = np.hstack((self.levels, pattern.levels))
             n_core += 1
+
+        return self
+
+    def group_output(self):
+        n_outputs = max([p['group_id'] for p in self.partitions]) + 1
+
+        # Init output matrix
+        sax_Ow = lil_matrix((self.Ow.shape[0], n_outputs))
+        sax_Om = lil_matrix((self.Om.shape[0], n_outputs))
+
+        for p in self.partitions:
+            sax_Ow[p['indices'], p['group_id']] = True
+            sax_Om[p['indices'], p['group_id']] = True
+
+        self.matrices['Ow'] = sax_Ow.tocsc()
+        self.matrices['Om'] = sax_Om.tocsc()
+
+        return self
+
+    def ungroup_output(self):
+        n_outputs = max([p['label_id'] for p in self.partitions]) + 1
+
+        # Init output matrix
+        sax_Ow = lil_matrix((self.Ow.shape[0], n_outputs))
+        sax_Om = lil_matrix((self.Om.shape[0], n_outputs))
+
+        for p in self.partitions:
+            sax_Ow[p['indices'], p['label_id']] = True
+            sax_Om[p['indices'], p['label_id']] = True
+
+        self.matrices['Ow'] = sax_Ow.tocsc()
+        self.matrices['Om'] = sax_Om.tocsc()
 
         return self
 

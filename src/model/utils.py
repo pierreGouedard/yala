@@ -25,20 +25,20 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
     l_patterns = []
     if sampler.patterns is None:
         for i in range(n_outputs):
-            # Add Empty base and sampled intersection into a yala structure
+            # Add Empty base and sampled intersection into a Yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
-                EmptyPattern(n_inputs, n_outputs, i),
-                YalaBasePattern.from_input_indices(n_inputs, n_outputs, i, sampler.samples[i], 1, ax_weights[i])
+                EmptyPattern(n_inputs, n_outputs, i, i),
+                YalaBasePattern.from_input_indices(n_inputs, n_outputs, i, i, sampler.samples[i], 1, ax_weights[i])
             ))
 
     else:
         for i, pattern in enumerate(sampler.patterns):
-            # Add Empty base and sampled intersection into a yala structure
+            # Add Empty base and sampled intersection into a Yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
                 pattern,
                 YalaBasePattern.from_input_indices(
-                    pattern.n_inputs, pattern.n_outputs, pattern.label_id, sampler.samples[i], 1,
-                    ax_weights[pattern.label_id]
+                    pattern.n_inputs, pattern.n_outputs, pattern.label_id, pattern.output_id, sampler.samples[i], 1,
+                    ax_weights[pattern.output_id]
                 )
             ))
 
@@ -58,25 +58,24 @@ def refine_precision(X, y, l_selected, weights=None, scoring=None):
     return l_selected
 
 
-def select_patterns(l_selected, firing_graph, dropout_rate=0.2):
+def select_patterns(l_selected, firing_graph, dropout_rate=0.2, n_label=1):
 
     l_selected_old = []
     if firing_graph is not None:
         l_selected_old = [
-            YalaPredPattern.from_partition(partition, firing_graph) for partition in firing_graph.partitions
+            YalaPredPattern.from_partition(p, firing_graph) for p in firing_graph.partitions
         ]
-
         # Augment firing graph with newly selected patterns
-        firing_graph = firing_graph.augment(l_selected, max([p['output_id'] for p in firing_graph.partitions]) + 1)
+        firing_graph = firing_graph.augment(l_selected, max([p['group_id'] for p in firing_graph.partitions]) + 1)
 
     else:
-        firing_graph = YalaPredPatterns.from_pred_patterns(l_selected, output_id=0)
+        firing_graph = YalaPredPatterns.from_pred_patterns(l_selected, group_id=0)
 
     # Merge firing graph
     if dropout_rate > 0:
 
         # Dropout patterns
-        l_candidates = l_selected + l_selected_old
+        l_candidates = [p.update_outputs(p.label_id, n_label) for p in l_selected + l_selected_old]
         l_dropout_indices = [i for i in range(len(l_candidates)) if np.random.binomial(1, dropout_rate)]
 
         # Build partial firing graph
@@ -170,7 +169,7 @@ def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph,
         {k: [i for i, _ in l_pats] for k, l_pats in d_new.items()}
     )
 
-    return sorted(l_new, key=lambda p: p.label_id), l_selected
+    return l_new, l_selected
 
 
 def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, min_firing, **kwargs):

@@ -73,7 +73,6 @@ class Yala(object):
         :param y:
         :return:
         """
-
         # Set core params from signal and current firing graph)
         ax_precision = np.asarray(y.sum(axis=0) / y.shape[0])[0]
 
@@ -91,7 +90,7 @@ class Yala(object):
         :return:
         """
         # Set current precision for each structure
-        ax_precision = np.array([p.precision for p in l_patterns])
+        ax_precision = np.array([p.precision for p in sorted(l_patterns, key=lambda x: x.output_id)])
         ax_lower_precision = (ax_precision - (2 * self.margin)).clip(min=self.min_gain)
         ax_upper_precision = (ax_precision - self.margin).clip(min=2 * self.min_gain)
 
@@ -169,7 +168,7 @@ class Yala(object):
 
             # Filter selected vertices with eval_set
             self.firing_graph, partial_firing_graph = select_patterns(
-                l_selected, self.firing_graph, self.dropout_vertex
+                l_selected, self.firing_graph, self.dropout_vertex, y.shape[1]
             )
 
             # Escape main loop on last retry condition
@@ -203,7 +202,7 @@ class Yala(object):
 
         return ax_preds
 
-    def predict_proba(self, X, min_probas=0.7, has_groups=True):
+    def predict_proba(self, X, min_probas=0.7):
         """
 
         :param X:
@@ -211,33 +210,17 @@ class Yala(object):
         """
         assert self.firing_graph is not None, "First fit firing graph"
 
-        # Propagate through the firing graph assigned activation with correct proba
-        ax_prec = np.array(
-            [p['precision'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
-        )
-        ax_activations = self.firing_graph.expand_outputs().propagate(X).A
-        ax_prec = (ax_activations * ax_prec)
-        self.firing_graph.contract_outputs()
+        ax_precisions = np.array([
+            p['precision'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])
+        ])
 
-        # Gather probas by group_id in partitions if necessary
-        if has_groups:
-            ax_prec[ax_prec == 0] = np.nan
-            l_group_ids = list(set([p['group_id'] for p in self.firing_graph.partitions]))
-            n, ax_probas = 0, np.zeros((ax_prec.shape[0], len(l_group_ids)))
-
-            for gid in l_group_ids:
-                l_indices = [p['indices'][0] for p in self.firing_graph.partitions if p['group_id'] == gid]
-                ax_probas[:, n] = np.nanmean(ax_prec[:, list(set(l_indices))], axis=1)
-                n += 1
-
-            ax_probas = np.nan_to_num(ax_probas, nan=min_probas).mean(axis=1)
-
-        else:
-            ax_probas = ax_prec.clip(min=min_probas).mean(axis=1)
+        ax_probas = self.firing_graph.group_output().propagate_value(X, ax_precisions).A
+        self.firing_graph.ungroup_output()
+        ax_probas = ax_probas.clip(min=min_probas).mean(axis=1)
 
         return ax_probas
 
-    def predict_score(self, X, min_score=0, has_groups=True):
+    def predict_score(self, X, min_score=0):
         """
 
         :param X:
@@ -245,26 +228,12 @@ class Yala(object):
         """
         assert self.firing_graph is not None, "First fit firing graph"
 
-        # Propagate through the firing graph assigned activation with correct proba
-        ax_score = np.array([p['score'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])])
-        ax_activations = self.firing_graph.expand_outputs().propagate(X).A
-        ax_score = (ax_activations * ax_score)
-        self.firing_graph.contract_outputs()
+        ax_score = np.array([
+            p['score'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])
+        ])
 
-        # Gather probas by group_id in partitions if necessary
-        if has_groups:
-            ax_score[ax_score == 0] = np.nan
-            l_group_ids = list(set([p['group_id'] for p in self.firing_graph.partitions]))
-            n, ax_probas = 0, np.zeros((ax_score.shape[0], len(l_group_ids)))
+        ax_res = self.firing_graph.group_output().propagate_value(X, ax_score).A
+        self.firing_graph.ungroup_output()
+        ax_res = ax_res.clip(min=min_score).mean(axis=1)
 
-            for gid in l_group_ids:
-                l_indices = [p['indices'][0] for p in self.firing_graph.partitions if p['group_id'] == gid]
-                ax_probas[:, n] = np.nanmean(ax_score[:, list(set(l_indices))], axis=1)
-                n += 1
-
-            ax_probas = np.nan_to_num(ax_probas, nan=min_score).mean(axis=1)
-
-        else:
-            ax_probas = ax_score.clip(min=min_score).mean(axis=1)
-
-        return ax_probas
+        return ax_res
