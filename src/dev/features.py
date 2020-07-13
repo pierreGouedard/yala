@@ -215,7 +215,9 @@ class FeatureBuilder(object):
     positions. Its transformation pipeline is composed of:
     """
 
-    def __init__(self, method=None, cat_cols=None, num_cols=None, target_name='target', target_transform=None):
+    def __init__(
+            self, method=None, cat_cols=None, num_cols=None, target_name='target', target_transform=None, n_label=None
+    ):
         """
 
         Attributes
@@ -227,6 +229,7 @@ class FeatureBuilder(object):
             Delimiter that is used to seperate token in text input.
         """
         self.method, self.target_name, self.cat_cols, self.num_cols = method, target_name, cat_cols, num_cols
+        self.n_label = n_label
         self.target_transform = target_transform
 
         self.model, self.target_encoder, self.is_built = None, None, None
@@ -323,7 +326,8 @@ class FeatureBuilder(object):
 
             elif self.target_transform == 'sparse_encoding':
                 y = self.target_encoder.transform(df_data[self.target_name])
-                if max(y) > 1:
+
+                if self.n_label > 1:
                     y = csc_matrix(([True] * y.shape[0], (range(y.shape[0]), y)), shape=(y.shape[0], len(np.unique(y))))
 
                 else:

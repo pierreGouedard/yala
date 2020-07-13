@@ -21,8 +21,8 @@ outputs = {
 
 parameters = {
     'model': 'yala',
-    'treshold': 0.8,
-    'id': 14#int(time.process_time() * 1000)
+    'id': 3,
+    'n_label': 2
 
 }
 
@@ -37,19 +37,32 @@ df_test = pd.read_csv(os.path.join(inputs['test']['path'], inputs['test']['name'
 
 import time
 t0 = time.time()
-df_probas = classifier.predict_score(df_test)
+df_probas = classifier.predict_proba(df_test, **{'n_label': parameters['n_label']})
 
 print('duration predict {}'.format(time.time() - t0))
 
-df_probas = df_probas.loc[:, 's']\
-        .sort_values(ascending=False)\
-        .to_frame('Class')\
-        .assign(rank=list(range(len(df_test))))\
+if parameters['n_label'] == 1:
+    df_probas = df_probas.loc[:, 's']\
+            .sort_values(ascending=False)\
+            .to_frame('Class')\
+            .assign(rank=list(range(len(df_test))))\
+            .assign(
+                RankOrder=range(len(df_test), 0, -1)
+            ) \
+            .reset_index() \
+            .loc[:, ['EventId', 'RankOrder', 'Class']]
+
+else:
+    df_probas = df_probas.loc[:, 's']\
+        .sort_values(ascending=False) \
+        .to_frame('Class') \
+        .assign(rank=list(range(len(df_test)))) \
         .assign(
             RankOrder=range(len(df_test), 0, -1)
         ) \
         .reset_index() \
         .loc[:, ['EventId', 'RankOrder', 'Class']]
+
 
 for t in [0.14, 0.15, 0.16]:
     parameters['treshold'] = t

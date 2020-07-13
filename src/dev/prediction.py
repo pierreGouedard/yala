@@ -331,7 +331,7 @@ class Classifier(object):
 
         return pd.Series(preds, index=df.index, name="prediction")
 
-    def predict_proba(self, df):
+    def predict_proba(self, df, **kwargs):
         """
         Predict probabilities over target space for feature in df.
 
@@ -344,15 +344,17 @@ class Classifier(object):
 
         """
         features = self.feature_builder.transform(df)
-        preds = self.model_classification.predict_proba(features)
+        preds = self.model_classification.predict_proba(features, **kwargs)
 
         if self.feature_builder.target_transform == 'sparse_encoding':
-            df_probas = pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_[[1]])
+            df_probas = pd.DataFrame(
+                preds, index=df.index, columns=self.feature_builder.target_encoder.classes_[-kwargs['n_label']:]
+            )
             return df_probas.fillna(0)
 
         return pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_)
 
-    def predict_score(self, df):
+    def predict_score(self, df, **kwargs):
         """
         Predict probabilities over target space for feature in df.
 
@@ -365,10 +367,12 @@ class Classifier(object):
 
         """
         features = self.feature_builder.transform(df)
-        preds = self.model_classification.predict_score(features)
+        preds = self.model_classification.predict_score(features, **kwargs)
 
         if self.feature_builder.target_transform == 'sparse_encoding':
-            df_probas = pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_[[1]])
+            df_probas = pd.DataFrame(
+                preds, index=df.index, columns=self.feature_builder.target_encoder.classes_[-kwargs['n_label']:]
+            )
             return df_probas
 
         return pd.DataFrame(preds, index=df.index, columns=self.feature_builder.target_encoder.classes_)

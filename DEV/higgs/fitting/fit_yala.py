@@ -35,25 +35,25 @@ params_folds = {
         'num_cols': [
             'DER_mass_MMC', 'DER_mass_transverse_met_lep', 'DER_mass_vis', 'DER_pt_h', 'DER_deltaeta_jet_jet',
             'DER_mass_jet_jet', 'DER_prodeta_jet_jet', 'DER_deltar_tau_lep', 'DER_pt_tot', 'DER_sum_pt',
-            'DER_pt_ratio_lep_tau', 'DER_met_phi_centrality', 'DER_lep_eta_centrality', 'PRI_tau_pt', 'PRI_tau_pt',
-            'PRI_tau_eta', 'PRI_tau_phi', 'PRI_lep_pt', 'PRI_lep_eta', 'PRI_lep_phi', 'PRI_met', 'PRI_met_phi',
-            'PRI_met_sumet', 'PRI_jet_leading_pt', 'PRI_jet_leading_eta', 'PRI_jet_leading_phi',
-            'PRI_jet_subleading_pt', 'PRI_jet_subleading_eta', 'PRI_jet_subleading_phi', 'PRI_jet_all_pt'
+            'DER_pt_ratio_lep_tau', 'DER_met_phi_centrality', 'PRI_tau_pt', 'PRI_tau_pt', 'PRI_tau_eta', 'PRI_tau_phi',
+            'PRI_lep_pt', 'PRI_lep_eta', 'PRI_lep_phi', 'PRI_met', 'PRI_met_phi', 'PRI_met_sumet', 'PRI_jet_leading_pt',
+            'PRI_jet_leading_eta', 'PRI_jet_subleading_eta', 'PRI_jet_all_pt'
         ],
         'cat_cols': ['PRI_jet_num'],
-        'target_transform': 'sparse_encoding'
+        'target_transform': 'sparse_encoding',
+        'n_label': 2
     }
 }
 
 params_yala = {
-    'sampling_rate': 1.0, 'n_sampling': 1, 'max_iter': 100, 'min_gain': 1e-3, 'batch_size': 150000,
+    'sampling_rate': 1.0, 'max_iter': 100, 'min_gain': 1e-3, 'batch_size': 150000,
     'drainer_batch_size': 30000, 'min_firing': 800, 'min_precision': 0.7, 'max_retry': 5,
-    'dropout_vertex': 0.1, 'dropout_mask': 0.9, "max_candidate": 100
+    'dropout_mask': 0.9, "max_candidate": 100
 }
 
 params_yala_grid = {}
 params_encoding = {
-    'params_num_enc': {'n_bins': 20, 'method': 'signal'},
+    'params_num_enc': {'n_bins': 30, 'method': 'signal'},
     'params_cat_enc': {'sparse': True, 'dtype': bool, 'handle_unknown': 'ignore'},
 }
 

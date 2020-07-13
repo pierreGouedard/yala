@@ -3,11 +3,12 @@ from firing_graph.core.tools.helpers.servers import ArrayServer
 from firing_graph.core.solver.sampler import SupervisedSampler
 from firing_graph.core.solver.drainer import FiringGraphDrainer
 import numpy as np
+from scipy.sparse import lil_matrix
 import time
 
 # Local import
-from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks, select_patterns, refine_precision
-from .patterns import YalaBasePattern
+from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks, refine_precision
+from .patterns import YalaPredPatterns
 
 
 class Yala(object):
@@ -21,7 +22,6 @@ class Yala(object):
 
     def __init__(self,
                  sampling_rate=0.8,
-                 n_sampling=10,
                  max_iter=5,
                  max_retry=5,
                  min_gain=1e-3,
@@ -33,21 +33,18 @@ class Yala(object):
                  max_precision=None,
                  overlap_rate=0.5,
                  init_eval_score=0,
-                 dropout_vertex=0.2,
                  dropout_mask=0.2,
                  max_candidate=100
                  ):
 
         # Core parameter of the algorithm
         self.sampling_rate = sampling_rate
-        self.n_sampling = n_sampling
         self.max_iter = max_iter
         self.max_retry = max_retry
         self.min_gain = min_gain
         self.margin = margin
         self.min_precision = min_precision
         self.eval_score = init_eval_score
-        self.dropout_vertex = dropout_vertex
         self.dropout_mask = dropout_mask
         self.max_candidate = max_candidate
 
@@ -115,7 +112,7 @@ class Yala(object):
         self.n_inputs, self.n_outputs = X.shape[1], y.shape[1]
         self.batch_size = min(y.shape[0], self.batch_size)
         self.drainer_batch_size = min(y.shape[0], self.drainer_batch_size)
-        self.sampler = SupervisedSampler(self.server, self.drainer_batch_size, self.sampling_rate, self.n_sampling)
+        self.sampler = SupervisedSampler(self.server, self.drainer_batch_size, self.sampling_rate)
 
         # Core loop
         count_no_update, l_dropouts = 0, []
@@ -164,12 +161,16 @@ class Yala(object):
                         len(self.sampler.patterns), ax_precision)
                     )
 
+            # TODO: The precision and score should be refined using firing graph and not for each selected patterns
             l_selected = refine_precision(X, y, l_selected, weights=sample_weight, scoring=scoring)
 
-            # Filter selected vertices with eval_set
-            self.firing_graph, partial_firing_graph = select_patterns(
-                l_selected, self.firing_graph, self.dropout_vertex, y.shape[1]
-            )
+            if self.firing_graph is not None:
+                self.firing_graph = self.firing_graph.augment(
+                    l_selected, max([p['group_id'] for p in self.firing_graph.partitions]) + 1
+                )
+
+            else:
+                self.firing_graph = YalaPredPatterns.from_pred_patterns(l_selected, group_id=0)
 
             # Escape main loop on last retry condition
             if not len(l_selected) > 0:
@@ -180,7 +181,7 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.pattern_mask = partial_firing_graph
+            self.server.pattern_mask = self.firing_graph.copy()
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
             self.sampler.patterns = None
@@ -202,7 +203,7 @@ class Yala(object):
 
         return ax_preds
 
-    def predict_proba(self, X, min_probas=0.7):
+    def predict_proba(self, X, n_label, min_probas=0.5):
         """
 
         :param X:
@@ -210,17 +211,30 @@ class Yala(object):
         """
         assert self.firing_graph is not None, "First fit firing graph"
 
-        ax_precisions = np.array([
-            p['precision'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])
-        ])
+        l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
 
-        ax_probas = self.firing_graph.group_output().propagate_value(X, ax_precisions).A
+        ax_probas = self.firing_graph\
+            .group_output()\
+            .propagate_value(X, np.array([p['precision'] for p in l_partitions])).A
+
+        sax_sum = lil_matrix((ax_probas.shape[1], n_label), dtype=bool)
+        for label in range(n_label):
+            l_indices = [p['group_id'] for p in l_partitions if p['label_id'] == label]
+            sax_sum[l_indices, label] = True
+
+        ax_count = sax_sum.sum(axis=0).A[0]
+        ax_probas = ax_probas.clip(min=min_probas).dot(sax_sum.A)
+
+        # Merge labels
+        ax_probas = ax_probas.dot(np.eye(n_label) * 2 - np.ones((n_label, n_label)))
+        ax_probas += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count)
+        ax_probas /= ax_count.sum()
+
         self.firing_graph.ungroup_output()
-        ax_probas = ax_probas.clip(min=min_probas).mean(axis=1)
 
         return ax_probas
 
-    def predict_score(self, X, min_score=0):
+    def predict_score(self, X, n_label, min_score=0):
         """
 
         :param X:
@@ -228,12 +242,25 @@ class Yala(object):
         """
         assert self.firing_graph is not None, "First fit firing graph"
 
-        ax_score = np.array([
-            p['score'] for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])
-        ])
+        l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
 
-        ax_res = self.firing_graph.group_output().propagate_value(X, ax_score).A
+        ax_scores = self.firing_graph\
+            .group_output()\
+            .propagate_value(X, [p['score'] for p in l_partitions]).A
+
+        sax_sum = lil_matrix((ax_scores.shape[1], n_label), dtype=bool)
+        for label in range(n_label):
+            l_indices = [p['group_id'] for p in l_partitions if p['label_id'] == label]
+            sax_sum[l_indices, label] = True
+
+        ax_count = sax_sum.sum(axis=0).A[0]
+        ax_scores = ax_scores.clip(min=min_score).dot(sax_sum.A)
+
+        # Merge labels
+        ax_scores = ax_scores.dot(np.eye(n_label) * 2 - np.ones((n_label, n_label)))
+        ax_scores += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count)
+        ax_scores /= ax_count.sum()
+
         self.firing_graph.ungroup_output()
-        ax_res = ax_res.clip(min=min_score).mean(axis=1)
 
-        return ax_res
+        return ax_scores

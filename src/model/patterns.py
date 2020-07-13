@@ -383,7 +383,7 @@ class YalaPredPatterns(FiringGraph):
                 'precision': pattern.precision,
                 'score': pattern.score,
                 'label_id': pattern.label_id,
-                'group_id': group_id,
+                'group_id': group_id + pattern.label_id,
                 'output_id': pattern.label_id
             })
 
@@ -438,9 +438,8 @@ class YalaPredPatterns(FiringGraph):
                 'precision': pattern.precision,
                 'score': pattern.score,
                 'label_id': pattern.label_id,
-                'group_id': group_id,
+                'group_id': group_id + pattern.label_id,
                 'output_id': pattern.label_id
-
             })
 
             # Augment matrices and levels

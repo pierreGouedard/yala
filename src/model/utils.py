@@ -1,7 +1,6 @@
 # Global imports
 import numpy as np
-from scipy.sparse import csc_matrix, diags, lil_matrix, tril, hstack
-from sklearn.model_selection import train_test_split
+from scipy.sparse import csc_matrix, diags, lil_matrix, hstack
 
 # Local import
 from .patterns import EmptyPattern, YalaBasePattern, YalaPredPattern, YalaDrainingPattern, \
@@ -51,43 +50,12 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
 def refine_precision(X, y, l_selected, weights=None, scoring=None):
     for p in l_selected:
         ax_activation = p.propagate(X).A[:, p.output_id]
-        p.precision = ax_activation.astype(int).dot(y.A[:, 0]) / ax_activation.sum()
-        if weights is not None and scoring is not None:
-            p.score = scoring(ax_activation, y, weights * (X.shape[0] / ax_activation.sum()))
+        p.precision = ax_activation.astype(int).dot(y.A[:, p.label_id]) / ax_activation.sum()
 
+        if weights is not None and scoring is not None:
+            p.score = scoring(ax_activation, y[:, [p.label_id]], weights * (X.shape[0] / ax_activation.sum()))
 
     return l_selected
-
-
-def select_patterns(l_selected, firing_graph, dropout_rate=0.2, n_label=1):
-
-    l_selected_old = []
-    if firing_graph is not None:
-        l_selected_old = [
-            YalaPredPattern.from_partition(p, firing_graph) for p in firing_graph.partitions
-        ]
-        # Augment firing graph with newly selected patterns
-        firing_graph = firing_graph.augment(l_selected, max([p['group_id'] for p in firing_graph.partitions]) + 1)
-
-    else:
-        firing_graph = YalaPredPatterns.from_pred_patterns(l_selected, group_id=0)
-
-    # Merge firing graph
-    if dropout_rate > 0:
-
-        # Dropout patterns
-        l_candidates = [p.update_outputs(p.label_id, n_label) for p in l_selected + l_selected_old]
-        l_dropout_indices = [i for i in range(len(l_candidates)) if np.random.binomial(1, dropout_rate)]
-
-        # Build partial firing graph
-        partial_firing_graph = YalaPredPatterns.from_pred_patterns(
-            l_base_patterns=[c for i, c in enumerate(l_candidates) if i not in l_dropout_indices]
-        )
-
-    else:
-        partial_firing_graph = firing_graph
-
-    return firing_graph, partial_firing_graph
 
 
 def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
@@ -118,8 +86,9 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
     return ax_p
 
 
-def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
-                                   overlap, min_precision, max_precision, min_gain, max_candidate):
+def disclose_patterns_multi_output(
+        l_completes, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
+        overlap, min_precision, max_precision, min_gain, max_candidate):
     """
 
     :param server:
@@ -133,44 +102,45 @@ def disclose_patterns_multi_output(l_selected, server, batch_size, firing_graph,
     :param max_precision:
     :return:
     """
-    d_new, d_selected, n = {}, {}, 0
+    l_partials, l_new_completes, n = [], [], 0
     sax_i = server.next_forward(batch_size, update_step=False).sax_data_forward
-    for i, v in server.get_outputs().items():
+    for i in range(server.n_label):
 
         # get partition
         l_partition_sub = [partition for partition in firing_graph.partitions if partition['label_id'] == i]
-        l_partition_sub = sorted(l_partition_sub, key=lambda p: p['output_id'])
+
+        if len(l_partition_sub) == 0:
+            print("label {}: {} candidate".format(i, len(l_partition_sub)))
+            l_new_completes.extend([p.update_outputs(i, server.n_label) for p in l_completes if p.label_id == i])
+            continue
 
         # Get already selected patterns for the output
-        l_selected_sub = [p for p in l_selected if p.label_id == i]
+        l_completes_sub = [p for p in l_completes if p.label_id == i]
 
         # Specify keyword args for selection
+        l_indices = [p['output_id'] for p in l_partition_sub]
         kwargs = {
-            'weight': ax_weights[v], 'p': drainer_params['p'][v], 'r': drainer_params['r'][v],
+            'weight': ax_weights[l_indices], 'p': drainer_params['p'][l_indices], 'r': drainer_params['r'][l_indices],
             "min_precision": min_precision, 'max_precision': max_precision, 'min_gain': min_gain,
             "max_candidate": max_candidate, 'label_id': i
         }
-        l_new, l_selected_ = disclose_patterns(
-            sax_i, l_selected_sub, l_partition_sub, firing_graph, overlap, min_firing, **kwargs
+        l_partials_, l_completes_ = disclose_patterns(
+            sax_i, l_completes_sub, l_partition_sub, firing_graph, overlap, min_firing, **kwargs
         )
 
-        # Update output mapping
-        d_new[i] = list(zip(*(list(range(n, n + len(l_new))), l_new)))
-        n += len(l_new)
+        # Add extend list of complete and partial patterns
+        l_partials.extend(l_partials_)
+        l_new_completes.extend([p.update_outputs(i, server.n_label) for p in l_completes_])
 
-        # Extend list of new patterns
-        d_selected[i] = l_selected_
+    # De-multiply output of partial pred patterns
+    l_new = [p.update_outputs(i, n_outputs=len(l_partials)) for i, p in enumerate(l_partials)]
 
-    # Get list of selected and new patterns
-    l_selected = [p.update_outputs(i, len(d_selected)) for i, l_p in d_selected.items() for p in l_p]
-    l_new = [p.update_outputs(i, n_outputs=n) for l_pats in d_new.values() for i, p in l_pats]
-
-    # set server backward pattern
+    # Set server backward pattern
     server.pattern_backward = YalaOutputSimplePattern.from_mapping(
-        {k: [i for i, _ in l_pats] for k, l_pats in d_new.items()}
+        {k: [p.output_id for p in l_new if p.label_id == k] for k in range(server.n_label)}
     )
 
-    return l_new, l_selected
+    return l_new, l_new_completes
 
 
 def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, min_firing, **kwargs):

@@ -58,7 +58,7 @@ def prepare_higgs_data(df, l_col_cats, l_targets, missing_value=None, scaler=Non
     # get list of numerical features
     l_num_features = sorted([c for c in df.columns if c not in l_col_cats + l_targets])
 
-    # Transform to nan missing value
+    # Transform missing value into nan
     if missing_value is not None:
         df = df.replace(to_replace=missing_value, value=nan)
 
