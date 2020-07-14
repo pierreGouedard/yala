@@ -110,7 +110,6 @@ def disclose_patterns_multi_output(
         l_partition_sub = [partition for partition in firing_graph.partitions if partition['label_id'] == i]
 
         if len(l_partition_sub) == 0:
-            print("label {}: {} candidate".format(i, len(l_partition_sub)))
             l_new_completes.extend([p.update_outputs(i, server.n_label) for p in l_completes if p.label_id == i])
             continue
 

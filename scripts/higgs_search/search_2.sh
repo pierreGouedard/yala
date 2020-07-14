@@ -8,6 +8,6 @@ for sr in "${samplingrates[@]}"
 do
   for mp in "${min_prec[@]}"
   do
-    python DEV/higgs/fitting/yala_search.py -p "$sr" min_firing=100 "$mp"
+    python DEV/higgs/fitting/yala_search.py -p "$sr" min_firing=1000 "$mp"
   done
 done

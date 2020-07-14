@@ -49,10 +49,11 @@ params_folds = {
 
 # Get params from args
 params_yala = {
-    'sampling_rate': 1.0, 'max_iter': 100, 'min_gain': 1e-3, 'batch_size': 90000,
+    'sampling_rate': 1.0, 'max_iter': 3, 'min_gain': 1e-3, 'batch_size': 90000,
     'drainer_batch_size': 30000, 'min_firing': 1000, 'min_precision': 0.7, 'max_retry': 5,
     'dropout_mask': 0.5, "max_candidate": 100
 }
+params_yala_grid = {}
 
 params_encoding = {
     'params_num_enc': {'n_bins': 30, 'method': 'signal'},
@@ -62,12 +63,8 @@ np.random.seed(1234)
 
 
 def fit_model(model_path, stats_path):
-
-    import IPython
-    IPython.embed()
-
     import time
-    t0 = time.times()
+    t0 = time.time()
 
     # Load inputs
     df_train = pd.read_csv(os.path.join(inputs['train']['path'], inputs['train']['name']), index_col='EventId')
@@ -128,11 +125,11 @@ def parse_args():
 
 if __name__ == "__main__":
 
-    params_yala_grid = parse_args()
-    params_yala.update(params_yala_grid)
+    params_yala_ = parse_args()
+    params_yala.update(params_yala_)
 
     # Defined custom output name based on parameters of the script
-    name_mdl = '{}'.format(KVName.from_dict(params_yala_grid).to_string())
+    name_mdl = '{}'.format(KVName.from_dict(params_yala_).to_string())
     path_mdl = os.path.join(outputs['model']['path'], outputs['model']['name'].format(name_mdl))
     path_stats = os.path.join(outputs['stats']['path'], outputs['stats']['name'].format(name_mdl))
 
