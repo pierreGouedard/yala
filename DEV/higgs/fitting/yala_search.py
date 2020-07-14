@@ -49,7 +49,7 @@ params_folds = {
 
 # Get params from args
 params_yala = {
-    'sampling_rate': 1.0, 'max_iter': 3, 'min_gain': 1e-3, 'batch_size': 90000,
+    'sampling_rate': 1.0, 'max_iter': 100, 'min_gain': 1e-3, 'batch_size': 90000,
     'drainer_batch_size': 30000, 'min_firing': 1000, 'min_precision': 0.7, 'max_retry': 5,
     'dropout_mask': 0.5, "max_candidate": 100
 }
