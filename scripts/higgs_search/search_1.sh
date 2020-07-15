@@ -1,11 +1,12 @@
 #!/bin/bash
+# sbatch --time=100:00:00 --mem-per-cpu=8000M --account=def-lwlcmyky-ab scripts/higgs_search/search_1.sh
 
 # Declare variables
 declare -a samplingrates=("sampling_rate=0.1" "sampling_rate=0.4" "sampling_rate=0.8")
 declare -a min_prec=("min_precision=0.6" "min_precision=0.75" "min_precision=0.85")
 
-conda activate yala-env && \
-export PYTHONPATH="$HOME/yala" && \
+conda init && conda activate yala-env
+export PYTHONPATH="$HOME/yala"
 export PYTHONPATH="$HOME/lib:$PYTHONPATH"
 
 for sr in "${samplingrates[@]}"
