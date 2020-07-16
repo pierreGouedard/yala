@@ -1,6 +1,7 @@
 # Global import
 import os
 import pandas as pd
+import numpy as np
 
 # Local import
 from settings import models_path, features_path, export_path
@@ -56,6 +57,7 @@ params_encoding = {
     'params_num_enc': {'n_bins': 30, 'method': 'signal'},
     'params_cat_enc': {'sparse': True, 'dtype': bool, 'handle_unknown': 'ignore'},
 }
+np.random.seed(1234)
 
 # Defined custom output name based on parameters of the script
 name_mdl = '{}'.format(KVName.from_dict(parameters).to_string())
