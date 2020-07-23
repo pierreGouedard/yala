@@ -7,7 +7,7 @@ from scipy.sparse import lil_matrix
 import time
 
 # Local import
-from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks, refine_precision
+from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks
 from .patterns import YalaPredPatterns
 
 
@@ -160,9 +160,6 @@ class Yala(object):
                     print("[YALA]: {} pattern updated, targeted precision are {}".format(
                         len(self.sampler.patterns), ax_precision)
                     )
-
-            # TODO: The precision and score should be refined using firing graph and not for each selected patterns
-            l_selected = refine_precision(X, y, l_selected, weights=sample_weight, scoring=scoring)
 
             if self.firing_graph is not None:
                 self.firing_graph = self.firing_graph.augment(
