@@ -21,7 +21,7 @@ outputs = {
 
 parameters = {
     'model': 'yala',
-    'id': 3,
+    'id': 8,
     'n_label': 2
 
 }
@@ -31,6 +31,9 @@ name_mdl = '{}'.format(KVName.from_dict({'model': parameters['model']}).to_strin
 # Load model
 with open(os.path.join(inputs['model']['path'], inputs['model']['name']).format(name_mdl), 'rb') as handle:
     classifier = pickle.load(handle)
+
+import IPython
+IPython.embed()
 
 # Load test features
 df_test = pd.read_csv(os.path.join(inputs['test']['path'], inputs['test']['name']), index_col="EventId")
