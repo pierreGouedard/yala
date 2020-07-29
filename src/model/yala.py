@@ -26,12 +26,14 @@ class Yala(object):
                  max_retry=5,
                  min_gain=1e-3,
                  margin=2e-2,
-                 drainer_batch_size=500,
+                 drainer_bs=500,
+                 selection_bs=None,
+                 sampler_bs=None,
                  batch_size=1000,
                  min_firing=10,
                  min_precision=0.75,
                  max_precision=None,
-                 overlap_rate=0.5,
+                 n_overlap=100,
                  init_eval_score=0,
                  dropout_mask=0.2,
                  max_candidate=100
@@ -53,14 +55,24 @@ class Yala(object):
         else:
             self.max_precision = max_precision
 
-        self.drainer_batch_size = drainer_batch_size
+        self.drainer_bs = drainer_bs
+        if selection_bs is None:
+            self.selection_bs = drainer_bs
+        else:
+            self.selection_bs = selection_bs
+
+        if sampler_bs is None:
+            self.sampler_bs = drainer_bs
+        else:
+            self.sampler_bs = sampler_bs
+
         self.batch_size = batch_size
 
         # Core attributes
         self.firing_graph = None
         self.drainer_params = {'t': -1}
         self.min_firing = min_firing
-        self.overlap = int(self.min_firing * (self.drainer_batch_size / self.batch_size) * overlap_rate)
+        self.n_overlap = n_overlap
         self.n_outputs, self.n_inputs = None, None
         self.server, self.sampler, self.drainer = None, None, None
 
@@ -111,8 +123,9 @@ class Yala(object):
         self.server = ArrayServer(X, y, dropout_mask=self.dropout_mask).stream_features()
         self.n_inputs, self.n_outputs = X.shape[1], y.shape[1]
         self.batch_size = min(y.shape[0], self.batch_size)
-        self.drainer_batch_size = min(y.shape[0], self.drainer_batch_size)
-        self.sampler = SupervisedSampler(self.server, self.drainer_batch_size, self.sampling_rate)
+        self.drainer_bs, self.selection_bs = min(y.shape[0], self.drainer_bs), min(y.shape[0], self.selection_bs)
+        self.sampler_bs = min(y.shape[0], self.drainer_bs)
+        self.sampler = SupervisedSampler(self.server, self.sampler_bs, self.sampling_rate)
 
         # Core loop
         count_no_update, l_dropouts = 0, []
@@ -133,15 +146,15 @@ class Yala(object):
 
                 # Drain firing graph
                 firing_graph = FiringGraphDrainer(
-                    firing_graph, self.server, self.drainer_batch_size, **self.drainer_params
+                    firing_graph, self.server, self.drainer_bs, **self.drainer_params
                 )\
                     .drain_all(n_max=self.batch_size)\
                     .firing_graph
 
                 # Disclose new patterns
                 self.sampler.patterns, l_selected = disclose_patterns_multi_output(
-                    l_selected, self.server, self.drainer_batch_size, firing_graph, self.drainer_params, ax_weights,
-                    self.min_firing, self.overlap, self.min_precision, self.max_precision, self.min_gain,
+                    l_selected, self.server, self.selection_bs, firing_graph, self.drainer_params, ax_weights,
+                    self.min_firing, self.n_overlap, self.min_precision, self.max_precision, self.min_gain,
                     self.max_candidate
                 )
 

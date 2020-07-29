@@ -77,7 +77,7 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
 
 def disclose_patterns_multi_output(
         l_completes, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
-        overlap, min_precision, max_precision, min_gain, max_candidate):
+        n_overlap, min_precision, max_precision, min_gain, max_candidate):
     """
 
     :param server:
@@ -113,7 +113,7 @@ def disclose_patterns_multi_output(
             "max_candidate": max_candidate, 'label_id': i
         }
         l_partials_, l_completes_ = disclose_patterns(
-            sax_i, l_completes_sub, l_partition_sub, firing_graph, overlap, min_firing, **kwargs
+            sax_i, l_completes_sub, l_partition_sub, firing_graph, n_overlap, min_firing, **kwargs
         )
 
         # Add extend list of complete and partial patterns
@@ -131,13 +131,13 @@ def disclose_patterns_multi_output(
     return l_new, l_new_completes
 
 
-def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, min_firing, **kwargs):
+def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, n_overlap, min_firing, **kwargs):
     """
 
     :param X:
     :param l_partitions:
     :param firing_graph:
-    :param overlap_rate:
+    :param n_overlap:
     :param min_firing:
     :param drainer_params:
     :param weight:
@@ -171,7 +171,7 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, overlap, mi
         # Update variables
         sax_selected[:, n] = sax_candidate[:, d_score['output_id']] > 0
         ax_is_selected[n] = (not d_score.get('is_new', True) or d_score['precision'] > kwargs['max_precision'])
-        ax_is_distinct = update_overlap_mask(sax_selected, sax_candidate, overlap)
+        ax_is_distinct = update_overlap_mask(sax_selected, sax_candidate, n_overlap)
 
         # Change index of output and add pattern
         l_patterns.append(YalaPredPattern.from_partition(d_score, candidate_pattern, label_id=kwargs['label_id']))
@@ -239,7 +239,9 @@ def build_pattern(sax_I, l_prec, sax_trans, max_candidate):
         sax_cand = sax_trans[:, i]
 
         if sax_cand.nnz > max_candidate:
-            sax_cand.data[sax_cand.data.argsort()[:sax_cand.nnz - max_candidate]] = 0
+            # TODO: test that way
+            #sax_cand.data[sax_cand.data.argsort()[:sax_cand.nnz - max_candidate]] = 0
+            sax_cand.data[np.random.choice(range(sax_cand.nnz), max_candidate, replace=False)] = 0
             sax_cand.eliminate_zeros()
 
         # Get each non zero entry in a single columns

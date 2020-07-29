@@ -47,9 +47,9 @@ params_folds = {
 }
 
 params_yala = {
-    'sampling_rate': 0.5, 'max_iter': 150, 'min_gain': 1e-3, 'batch_size': 150000,
-    'drainer_batch_size': 30000, 'min_firing': 500, 'min_precision': 0.85, 'max_retry': 5,
-    'dropout_mask': 0.9, "max_candidate": 100
+    'sampling_rate': 0.5, 'max_iter': 150, 'min_gain': 1e-3, 'batch_size': 90000,
+    'drainer_batch_size': 30000, 'min_firing': 200, 'min_precision': 0.85, 'max_retry': 5,
+    'dropout_mask': 0.9, "max_candidate": 100, 'n_overlap': 50
 }
 
 params_yala_grid = {}
