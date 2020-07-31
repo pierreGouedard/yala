@@ -21,7 +21,7 @@ outputs = {
 
 parameters = {
     'model': 'yala',
-    'id': 8,
+    'id': 9,
     'n_label': 2
 
 }
