@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Declare variables
-declare -a args1=("n_overlap=10" "n_overlap=50" "n_overlap=100")
+declare -a args1=("min_precision=0.8" "min_precision=0.95")
 
 source $(conda info --base)/etc/profile.d/conda.sh  && conda activate yala-env
 export PYTHONPATH="$HOME/projects/def-lwlcmyky-ab/pvanleeu/yala"
