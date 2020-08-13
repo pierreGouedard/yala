@@ -9,5 +9,5 @@ export PYTHONPATH="$HOME/projects/def-lwlcmyky-ab/pvanleeu/lib:$PYTHONPATH"
 
 for arg1 in "${args1[@]}"
 do
-    python DEV/higgs/fitting/yala_search.py -p "$arg1" min_firing=300
+    python DEV/higgs/fitting/yala_search.py -p "$arg1"
 done

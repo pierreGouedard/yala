@@ -213,7 +213,7 @@ class Yala(object):
 
         return ax_preds
 
-    def predict_proba(self, X, n_label, min_probas=0.5):
+    def predict_proba(self, X, n_label, min_probas=0.5, max_batch=50000):
         """
 
         :param X:
@@ -225,7 +225,7 @@ class Yala(object):
 
         ax_probas = self.firing_graph\
             .group_output()\
-            .propagate_value(X, np.array([p['precision'] for p in l_partitions])).A
+            .propagate_value(X, np.array([p['precision'] for p in l_partitions]), max_batch=max_batch).A
 
         sax_sum = lil_matrix((ax_probas.shape[1], n_label), dtype=bool)
         for label in range(n_label):
