@@ -174,6 +174,9 @@ class Yala(object):
                         len(self.sampler.patterns), ax_precision)
                     )
 
+            import IPython
+            IPython.embed()
+
             if self.firing_graph is not None:
                 self.firing_graph = self.firing_graph.augment(
                     l_selected, max([p['group_id'] for p in self.firing_graph.partitions]) + 1

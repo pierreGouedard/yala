@@ -180,15 +180,17 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, n_overlap, 
         # Update variables
         ax_is_selected[n] = (not d_partition.get('is_new', True) or d_partition['precision'] > kwargs['max_precision'])
 
-        # TODO Add new pattern signature
-        l_signature_selected.append(d_partition)
-        ax_is_distinct = update_overlap_mask(l_signature_selected)
+        # Update distinct array
+        if 'signature' in d_partition.keys():
+            ax_is_distinct = update_overlap_mask(
+                ax_is_distinct, candidate_pattern.partitions, d_partition.pop('signature')
+            )
 
         # Change index of output and add pattern
         l_patterns.append(YalaPredPattern.from_partition(d_partition, candidate_pattern, label_id=kwargs['label_id']))
         n += 1
 
-    # TODO: dot it when everything is selected (not here) compute normalized precision
+    # TODO: do it when everything is selected (not here) compute normalized precision
     # ax_norm_precision = get_normalized_precision(
     #     sax_selected[:, :n].tocsc(), np.array([pat.precision for pat in l_patterns]),
     #     ax_is_selected[:n]
@@ -276,8 +278,8 @@ def build_pattern(sax_pred_I, l_pred_precision, sax_trans_precision, sax_trans_c
         {"indices": [i], "precision": p, "output_id": i, "is_new": False} for i, p in enumerate(l_pred_precision)
     ]
     l_partitions.extend([
-        {"indices": [len(l_pred_precision) + i], "precision": p, "count": c, "output_id": len(l_pred_precision) + i}
-        for i, (p, c) in enumerate(l_signature_trans)
+        {"indices": [len(l_pred_precision) + i], "precision": p, "signature": p * c,
+         "output_id": len(l_pred_precision) + i} for i, (p, c) in enumerate(l_signature_trans)
     ])
 
     return YalaPredPatterns.from_input_matrix(hstack([sax_pred_I] + l_trans_inputs), l_partitions)
@@ -305,17 +307,22 @@ def get_transient_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec
     return sax_precision.multiply(precision_mask)
 
 
-def update_overlap_mask(sax_base, sax_patterns, overlap):
+def update_overlap_mask(ax_is_distinct, l_partitions, signature):
     """
 
-    :param sax_base:
-    :param sax_patterns:
-    :param overlap_rate:
+    :param l_partitions:
+    :param l_signatures:
     :return:
     """
-    ax_diff = sax_patterns.astype(int).sum(axis=0) - \
-        csc_matrix(sax_base.sum(axis=1)).transpose().astype(int).dot(sax_patterns)
-    return np.array(ax_diff)[0] > overlap
+    if signature is None:
+        return
+
+    ax_diff = np.array(
+        [[p['output_id'], abs(p['signature'] - signature)] for p in l_partitions if 'signature' in p.keys()]
+    )
+    ax_is_distinct[ax_diff[:, 0].astype(int)] &= ax_diff[:, 1] > np.percentile(ax_diff[:, 1], 5)
+
+    return ax_is_distinct
 
 
 def set_feedbacks(ax_phi_old, ax_phi_new, r_max=1000):
