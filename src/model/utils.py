@@ -75,6 +75,66 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
     return ax_p
 
 
+def filter_selected(server, l_selected, n_overlap, batch_size):
+    # Get forward signal
+    sax_i = server.next_forward(batch_size, update_step=False).sax_data_forward
+    l_filtered = []
+    import IPython
+    IPython.embed()
+    # For each label eurate selected patterns
+    for i in range(server.n_label):
+        try:
+            # Create Firing graph with sorted partition
+            fg = YalaPredPatterns.from_pred_patterns([p for p in l_selected if p.label_id == i])
+            fg.partitions = sorted([p for p in fg.partitions], key=lambda p: p['precision'], reverse=True)
+
+            # Assign a different group_id to each pattern
+            for i, p in enumerate(fg.partitions):
+                p['group_id'] = i
+
+            # Set variables for filtering
+            sax_candidate = fg.group_output().propagate(sax_i)
+            sax_selected = lil_matrix(sax_candidate.shape)
+            ax_is_distinct = np.ones(sax_candidate.shape[1], dtype=bool)
+            n = 0
+
+            # Filter pred patterns
+            for p in fg.partitions:
+                if not ax_is_distinct[p['output_id']]:
+                    continue
+
+                # Update variables
+                sax_selected[:, n] = sax_candidate[:, p['output_id']] > 0
+                ax_is_distinct = update_overlap_mask_(sax_selected, sax_candidate, n_overlap)
+
+                # Change index of output and add pattern
+                l_filtered.append(
+                    YalaPredPattern.from_partition(p, fg, label_id=p['label_id']).update_outputs(i, server.n_label)
+                )
+                n += 1
+        except:
+            import IPython
+            IPython.embed()
+
+    return l_filtered
+
+
+def update_overlap_mask_(sax_base, sax_patterns, overlap):
+    """
+
+    :param sax_base:
+    :param sax_patterns:
+    :param overlap_rate:
+    :return:
+    """
+    ax_diff = sax_patterns.astype(int).sum(axis=0) - \
+        csc_matrix(sax_base.sum(axis=1)).transpose().astype(int).dot(sax_patterns)
+    return np.array(ax_diff)[0] > overlap
+
+
+
+
+
 def disclose_patterns_multi_output(
         l_completes, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
         n_overlap, min_precision, max_precision, min_gain, max_candidate):
@@ -113,7 +173,7 @@ def disclose_patterns_multi_output(
             "max_candidate": max_candidate, 'label_id': i
         }
         l_partials_, l_completes_ = disclose_patterns(
-            sax_i, l_completes_sub, l_partition_sub, firing_graph, n_overlap, min_firing, **kwargs
+            sax_i, l_completes_sub, l_partition_sub, firing_graph, min_firing, **kwargs
         )
 
         # Add extend list of complete and partial patterns
@@ -131,7 +191,7 @@ def disclose_patterns_multi_output(
     return l_new, l_new_completes
 
 
-def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, n_overlap, min_firing, **kwargs):
+def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, min_firing, **kwargs):
     """
 
     :param X:
@@ -150,18 +210,6 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, n_overlap, 
 
     if candidate_pattern is None:
         return [], []
-
-    # TODO:
-    #   * Candidate patterns has partition with precision for old patterns and with (precision, count) for new patternw
-    #   * Partition should be again sorted by precision
-    #   * Old patterns are considered 2 by 2 diff (because of previous iteration) and different from their 'child'
-    #     Thus the only criterion for selection is min proba
-    #   * New patterns are selected upon their precision and their overlap with selected other new patterns
-    #   * overlap is a function of (precision, count, non_zero_input)
-    #  others
-    #   * Make sure creating a candidate pattern is usefull or it neither optimal not necessary given new selection
-    #     rules
-    #   *
 
     # Set variables for selection
     ax_is_distinct = np.ones(len(candidate_pattern.partitions), dtype=bool)
@@ -270,8 +318,8 @@ def build_pattern(sax_pred_I, l_pred_precision, sax_trans_precision, sax_trans_c
         l_updated.append(i)
 
     # Remove previous pattern that has been updated TODO: is it usefull ?
-    #sax_pred_I = sax_pred_I[:, [i for i in range(sax_pred_I.shape[1]) if i not in l_updated]]
-    #l_pred_precision = [p for i, p in enumerate(l_pred_precision) if i not in l_updated]
+    sax_pred_I = sax_pred_I[:, [i for i in range(sax_pred_I.shape[1]) if i not in l_updated]]
+    l_pred_precision = [p for i, p in enumerate(l_pred_precision) if i not in l_updated]
 
     # build partition
     l_partitions = [
@@ -315,11 +363,15 @@ def update_overlap_mask(ax_is_distinct, l_partitions, signature):
     :return:
     """
     if signature is None:
-        return
+        return ax_is_distinct
 
     ax_diff = np.array(
         [[p['output_id'], abs(p['signature'] - signature)] for p in l_partitions if 'signature' in p.keys()]
     )
+
+    if len(ax_diff) == 0:
+        return ax_is_distinct
+
     ax_is_distinct[ax_diff[:, 0].astype(int)] &= ax_diff[:, 1] > np.percentile(ax_diff[:, 1], 5)
 
     return ax_is_distinct

@@ -362,7 +362,7 @@ class YalaPredPatterns(FiringGraph):
             "Patterns of different depth inputed in YalaPredPatterns"
 
     @staticmethod
-    def from_pred_patterns(l_base_patterns, group_id=None):
+    def from_pred_patterns(l_base_patterns, group_id=0):
 
         if len(l_base_patterns) == 0:
             return None

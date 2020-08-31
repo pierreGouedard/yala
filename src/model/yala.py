@@ -7,7 +7,7 @@ from scipy.sparse import lil_matrix
 import time
 
 # Local import
-from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks
+from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks, filter_selected
 from .patterns import YalaPredPatterns
 
 
@@ -174,8 +174,7 @@ class Yala(object):
                         len(self.sampler.patterns), ax_precision)
                     )
 
-            import IPython
-            IPython.embed()
+            l_selected = filter_selected(self.server, l_selected, self.n_overlap, self.selection_bs)
 
             if self.firing_graph is not None:
                 self.firing_graph = self.firing_graph.augment(
@@ -238,7 +237,7 @@ class Yala(object):
         ax_count = sax_sum.sum(axis=0).A[0]
         ax_probas = ax_probas.clip(min=min_probas).dot(sax_sum.A)
 
-        # Merge labels
+        # Merge labels (comment lines below to come back to 1 label)
         ax_probas = ax_probas.dot(np.eye(n_label) * 2 - np.ones((n_label, n_label)))
         ax_probas += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count)
         ax_probas /= ax_count.sum()
@@ -246,34 +245,3 @@ class Yala(object):
         self.firing_graph.ungroup_output()
 
         return ax_probas
-
-    def predict_score(self, X, n_label, min_score=0):
-        """
-
-        :param X:
-        :return:
-        """
-        assert self.firing_graph is not None, "First fit firing graph"
-
-        l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
-
-        ax_scores = self.firing_graph\
-            .group_output()\
-            .propagate_value(X, [p['score'] for p in l_partitions]).A
-
-        sax_sum = lil_matrix((ax_scores.shape[1], n_label), dtype=bool)
-        for label in range(n_label):
-            l_indices = [p['group_id'] for p in l_partitions if p['label_id'] == label]
-            sax_sum[l_indices, label] = True
-
-        ax_count = sax_sum.sum(axis=0).A[0]
-        ax_scores = ax_scores.clip(min=min_score).dot(sax_sum.A)
-
-        # Merge labels
-        ax_scores = ax_scores.dot(np.eye(n_label) * 2 - np.ones((n_label, n_label)))
-        ax_scores += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count)
-        ax_scores /= ax_count.sum()
-
-        self.firing_graph.ungroup_output()
-
-        return ax_scores
