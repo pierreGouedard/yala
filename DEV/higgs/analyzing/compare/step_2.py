@@ -64,6 +64,7 @@ plt.scatter(ax_coord_old[:, 0], ax_coord_old[:, 1], label="old")
 plt.scatter(ax_coord_lazy[:, 0], ax_coord_lazy[:, 1], label="lazy")
 plt.legend()
 plt.show()
-
+import IPython
+IPython.embed()
 
 

@@ -86,6 +86,7 @@ def filter_selected(server, l_selected, n_overlap, batch_size):
         fg = YalaPredPatterns.from_pred_patterns([p for p in l_selected if p.label_id == i])
         if fg is None:
             continue
+
         fg.partitions = sorted([p for p in fg.partitions], key=lambda p: p['precision'], reverse=True)
 
         # Assign a different group_id to each pattern
@@ -311,9 +312,9 @@ def build_pattern(sax_pred_I, l_pred_precision, sax_trans_precision, sax_trans_c
         l_trans_inputs.append(sax_trans_I)
         l_updated.append(i)
 
-    # Remove previous pattern that has been updated TODO: is it usefull ?
-    sax_pred_I = sax_pred_I[:, [i for i in range(sax_pred_I.shape[1]) if i not in l_updated]]
-    l_pred_precision = [p for i, p in enumerate(l_pred_precision) if i not in l_updated]
+    # Remove previous pattern that has been updated TODO: is it usefull ? (in this setting I don't think so)
+    # sax_pred_I = sax_pred_I[:, [i for i in range(sax_pred_I.shape[1]) if i not in l_updated]]
+    # l_pred_precision = [p for i, p in enumerate(l_pred_precision) if i not in l_updated]
 
     # build partition
     l_partitions = [

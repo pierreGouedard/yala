@@ -101,7 +101,7 @@ class Yala(object):
         # Set current precision for each structure
         ax_precision = np.array([p.precision for p in sorted(l_patterns, key=lambda x: x.output_id)])
         ax_lower_precision = (ax_precision - (2 * self.margin)).clip(min=self.min_gain)
-        ax_upper_precision = (ax_precision - self.margin).clip(min=2 * self.min_gain)
+        ax_uppergenerative_sampling_precision = (ax_precision - self.margin).clip(min=2 * self.min_gain)
 
         # Get corresponding reward / penalty and update drainer_params
         ax_p, ax_r = set_feedbacks(ax_lower_precision, ax_upper_precision)
