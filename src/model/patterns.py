@@ -362,19 +362,19 @@ class YalaPredPatterns(FiringGraph):
             "Patterns of different depth inputed in YalaPredPatterns"
 
     @staticmethod
-    def from_pred_patterns(l_base_patterns, group_id=0):
+    def from_pred_patterns(l_patterns, group_id=0, keep_output_id=False):
 
-        if len(l_base_patterns) == 0:
+        if len(l_patterns) == 0:
             return None
 
         # check patterns and intitialize variables
-        YalaPredPatterns.check_patterns(l_base_patterns)
+        YalaPredPatterns.check_patterns(l_patterns)
         l_partitions, n_core, l_levels = [], 0, []
-        n_inputs, n_outputs = l_base_patterns[0].n_inputs, l_base_patterns[0].n_outputs
+        n_inputs, n_outputs = l_patterns[0].n_inputs, l_patterns[0].n_outputs
         d_matrices = create_empty_matrices(n_inputs, n_outputs, 0)
 
         # Build pattern from list of patterns
-        for pattern in l_base_patterns:
+        for pattern in l_patterns:
 
             # Set partitions
             l_partitions.append({
@@ -384,7 +384,7 @@ class YalaPredPatterns(FiringGraph):
                 'score': pattern.score,
                 'label_id': pattern.label_id,
                 'group_id': group_id + pattern.label_id,
-                'output_id': pattern.label_id
+                'output_id': pattern.output_id if keep_output_id else pattern.label_id
             })
 
             # Augment matrices and levels
@@ -395,7 +395,7 @@ class YalaPredPatterns(FiringGraph):
         # Add firing graph kwargs
         kwargs = {'partitions': l_partitions, 'matrices': d_matrices, 'ax_levels': np.array(l_levels)}
 
-        return YalaPredPatterns(l_base_patterns[0].n_inputs, l_base_patterns[0].n_outputs, **kwargs)
+        return YalaPredPatterns(l_patterns[0].n_inputs, l_patterns[0].n_outputs, **kwargs)
 
     @staticmethod
     def from_input_matrix(sax_I, l_partitions):
@@ -420,7 +420,7 @@ class YalaPredPatterns(FiringGraph):
 
         return YalaPredPatterns(d_matrices['Iw'].shape[0], d_matrices['Ow'].shape[1], **kwargs)
 
-    def augment(self, l_base_patterns, group_id=None):
+    def augment(self, l_base_patterns, group_id, keep_output_id=False):
 
         if len(l_base_patterns) == 0:
             return self
@@ -439,7 +439,7 @@ class YalaPredPatterns(FiringGraph):
                 'score': pattern.score,
                 'label_id': pattern.label_id,
                 'group_id': group_id + pattern.label_id,
-                'output_id': pattern.label_id
+                'output_id': pattern.output_id if keep_output_id else pattern.label_id
             })
 
             # Augment matrices and levels
@@ -457,6 +457,7 @@ class YalaPredPatterns(FiringGraph):
         sax_Om = lil_matrix((self.Om.shape[0], n_outputs))
 
         for p in self.partitions:
+            p['output_id'] = p['group_id']
             sax_Ow[p['indices'], p['group_id']] = True
             sax_Om[p['indices'], p['group_id']] = True
 
@@ -473,6 +474,7 @@ class YalaPredPatterns(FiringGraph):
         sax_Om = lil_matrix((self.Om.shape[0], n_outputs))
 
         for p in self.partitions:
+            p['output_id'] = p['label_id']
             sax_Ow[p['indices'], p['label_id']] = True
             sax_Om[p['indices'], p['label_id']] = True
 
@@ -480,6 +482,12 @@ class YalaPredPatterns(FiringGraph):
         self.matrices['Om'] = sax_Om.tocsc()
 
         return self
+
+    def isolate_output(self):
+        for p in self.partitions:
+            p['group_id'] = p['output_id']
+
+        return self.group_output()
 
     def copy(self):
 

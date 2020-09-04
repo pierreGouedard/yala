@@ -152,26 +152,29 @@ class Yala(object):
                     .firing_graph
 
                 # Disclose new patterns
-                self.sampler.patterns, l_selected = disclose_patterns_multi_output(
-                    l_selected, self.server, self.selection_bs, firing_graph, self.drainer_params, ax_weights,
-                    self.min_firing, self.n_overlap, self.min_precision, self.max_precision, self.min_gain,
-                    self.max_candidate
+                l_trans, l_selected = disclose_patterns_multi_output(
+                    l_selected, self.server, firing_graph, self.drainer_params, ax_weights, self.min_firing,
+                    self.min_precision, self.max_precision, self.min_gain, self.max_candidate
                 )
 
-                print("[YALA]: {} pattern disclosed".format(len(self.sampler.patterns)))
-                stop = (len(self.sampler.patterns) == 0)
+                print("[YALA]: {} pattern disclosed".format(len(l_trans)))
+                stop = (len(l_trans) == 0)
 
                 if not stop:
 
                     # update parameters
-                    ax_precision, ax_weights = self.__core_parameters(self.sampler.patterns)
+                    ax_precision, ax_weights = self.__core_parameters(l_trans)
 
-                    # Sample
-                    firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), ax_weights)
+                    # update pattern for sampler
+                    self.sampler.pattern = YalaPredPatterns.from_pred_patterns(l_trans, keep_output_id=True)\
+                        .isolate_output()
+
+                    # Sample and create new fg
+                    firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), ax_weights, l_trans)
                     n += 1
 
                     print("[YALA]: {} pattern updated, targeted precision are {}".format(
-                        len(self.sampler.patterns), ax_precision)
+                        len(self.sampler.pattern.partitions), ax_precision)
                     )
 
             l_selected = filter_selected(self.server, l_selected, self.n_overlap, self.selection_bs)
@@ -193,10 +196,10 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.pattern_mask = self.firing_graph.copy()
+            self.server.update_mask(self.firing_graph)
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
-            self.sampler.patterns = None
+            self.sampler.pattern = None
 
         return self
 

@@ -7,7 +7,7 @@ from .patterns import EmptyPattern, YalaBasePattern, YalaPredPattern, YalaDraini
     YalaDrainingPatterns, YalaPredPatterns, YalaOutputSimplePattern
 
 
-def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
+def build_firing_graph(sampler, ax_weights, l_trans=None, n_inputs=None, n_outputs=None):
     """
 
     :param sampler:
@@ -22,7 +22,7 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
         )
 
     l_patterns = []
-    if sampler.patterns is None:
+    if l_trans is None:
         for i in range(n_outputs):
             # Add Empty base and sampled intersection into a Yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
@@ -31,7 +31,7 @@ def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
             ))
 
     else:
-        for i, pattern in enumerate(sampler.patterns):
+        for i, pattern in enumerate(l_trans):
             # Add Empty base and sampled intersection into a Yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
                 pattern,
@@ -79,42 +79,40 @@ def filter_selected(server, l_selected, n_overlap, batch_size):
     # Get forward signal
     sax_i = server.next_forward(batch_size, update_step=False).sax_data_forward
     l_filtered = []
-    import IPython
-    IPython.embed()
     # For each label eurate selected patterns
     for i in range(server.n_label):
-        try:
-            # Create Firing graph with sorted partition
-            fg = YalaPredPatterns.from_pred_patterns([p for p in l_selected if p.label_id == i])
-            fg.partitions = sorted([p for p in fg.partitions], key=lambda p: p['precision'], reverse=True)
 
-            # Assign a different group_id to each pattern
-            for i, p in enumerate(fg.partitions):
-                p['group_id'] = i
+        # Create Firing graph with sorted partition
+        fg = YalaPredPatterns.from_pred_patterns([p for p in l_selected if p.label_id == i])
+        if fg is None:
+            continue
+        fg.partitions = sorted([p for p in fg.partitions], key=lambda p: p['precision'], reverse=True)
 
-            # Set variables for filtering
-            sax_candidate = fg.group_output().propagate(sax_i)
-            sax_selected = lil_matrix(sax_candidate.shape)
-            ax_is_distinct = np.ones(sax_candidate.shape[1], dtype=bool)
-            n = 0
+        # Assign a different group_id to each pattern
+        for i, p in enumerate(fg.partitions):
+            p['group_id'] = i
 
-            # Filter pred patterns
-            for p in fg.partitions:
-                if not ax_is_distinct[p['output_id']]:
-                    continue
+        # Set variables for filtering
+        sax_candidate = fg.group_output().propagate(sax_i)
+        sax_selected = lil_matrix(sax_candidate.shape)
+        ax_is_distinct = np.ones(sax_candidate.shape[1], dtype=bool)
+        n = 0
 
-                # Update variables
-                sax_selected[:, n] = sax_candidate[:, p['output_id']] > 0
-                ax_is_distinct = update_overlap_mask_(sax_selected, sax_candidate, n_overlap)
+        # Filter pred patterns
+        for p in fg.partitions:
+            if not ax_is_distinct[p['output_id']]:
+                continue
 
-                # Change index of output and add pattern
-                l_filtered.append(
-                    YalaPredPattern.from_partition(p, fg, label_id=p['label_id']).update_outputs(i, server.n_label)
-                )
-                n += 1
-        except:
-            import IPython
-            IPython.embed()
+            # Update variables
+            sax_selected[:, n] = sax_candidate[:, p['output_id']] > 0
+            ax_is_distinct = update_overlap_mask_(sax_selected, sax_candidate, n_overlap)
+
+            # Change index of output and add pattern
+            l_filtered.append(
+                YalaPredPattern.from_partition(p, fg, label_id=p['label_id'])
+                .update_outputs(p['label_id'], server.n_label)
+            )
+            n += 1
 
     return l_filtered
 
@@ -132,27 +130,21 @@ def update_overlap_mask_(sax_base, sax_patterns, overlap):
     return np.array(ax_diff)[0] > overlap
 
 
-
-
-
 def disclose_patterns_multi_output(
-        l_completes, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
-        n_overlap, min_precision, max_precision, min_gain, max_candidate):
+        l_completes, server, firing_graph, drainer_params, ax_weights, min_firing, min_precision, max_precision,
+        min_gain, max_candidate):
     """
 
     :param server:
     :param firing_graph:
-    :param batch_size:
     :param drainer_params:
     :param ax_weights:
     :param min_firing:
-    :param overlap:
     :param min_precision:
     :param max_precision:
     :return:
     """
     l_partials, l_new_completes, n = [], [], 0
-    sax_i = server.next_forward(batch_size, update_step=False).sax_data_forward
     for i in range(server.n_label):
 
         # get partition
@@ -173,7 +165,7 @@ def disclose_patterns_multi_output(
             "max_candidate": max_candidate, 'label_id': i
         }
         l_partials_, l_completes_ = disclose_patterns(
-            sax_i, l_completes_sub, l_partition_sub, firing_graph, min_firing, **kwargs
+            l_completes_sub, l_partition_sub, firing_graph, min_firing, **kwargs
         )
 
         # Add extend list of complete and partial patterns
@@ -191,7 +183,7 @@ def disclose_patterns_multi_output(
     return l_new, l_new_completes
 
 
-def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, min_firing, **kwargs):
+def disclose_patterns(l_selected, l_partitions, firing_graph, min_firing, **kwargs):
     """
 
     :param X:
@@ -219,6 +211,9 @@ def disclose_patterns(sax_X, l_selected, l_partitions, firing_graph, min_firing,
     for d_partition in sorted(candidate_pattern.partitions, key=lambda x: x['precision'], reverse=True):
         if not ax_is_distinct[d_partition['output_id']]:
             continue
+
+        if len(l_patterns) > kwargs['max_candidate']:
+            break
 
         # if target precision of a base pattern is not reached, drop the pattern
         if not d_partition.get('is_new', True):
@@ -285,7 +280,6 @@ def build_pattern(sax_pred_I, l_pred_precision, sax_trans_precision, sax_trans_c
     :param sax_I:
     :param l_prec:
     :param sax_trans:
-    :param max_candidate:
     :return:
     """
     # Build candidate input matrix
