@@ -128,6 +128,8 @@ class Yala(object):
         self.sampler = SupervisedSampler(self.server, self.sampler_bs, self.sampling_rate)
 
         # Core loop
+        import time
+        start = time.time()
         count_no_update, l_dropouts = 0, []
         for i in range(self.max_iter):
             print("[YALA]: Iteration {}".format(i))
@@ -152,26 +154,30 @@ class Yala(object):
                     .firing_graph
 
                 # Disclose new patterns
-                self.sampler.patterns, l_selected = disclose_patterns_multi_output(
+                l_transients, l_selected = disclose_patterns_multi_output(
                     l_selected, self.server, self.selection_bs, firing_graph, self.drainer_params, ax_weights,
                     self.min_firing, self.n_overlap, self.min_precision, self.max_precision, self.min_gain,
                     self.max_candidate
                 )
 
-                print("[YALA]: {} pattern disclosed".format(len(self.sampler.patterns)))
-                stop = (len(self.sampler.patterns) == 0)
+                print("[YALA]: {} pattern disclosed".format(len(l_transients)))
+                stop = (len(l_transients) == 0)
 
                 if not stop:
 
                     # update parameters
-                    ax_precision, ax_weights = self.__core_parameters(self.sampler.patterns)
+                    ax_precision, ax_weights = self.__core_parameters(l_transients)
+
+                    # update pattern for sampler
+                    self.sampler.pattern = YalaPredPatterns.from_pred_patterns(l_transients, keep_output_id=True) \
+                        .isolate_output()
 
                     # Sample
-                    firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), ax_weights)
+                    firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), l_transients, ax_weights)
                     n += 1
 
                     print("[YALA]: {} pattern updated, targeted precision are {}".format(
-                        len(self.sampler.patterns), ax_precision)
+                        len(self.sampler.pattern.partitions), ax_precision)
                     )
 
             if self.firing_graph is not None:
@@ -191,11 +197,12 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.pattern_mask = self.firing_graph.copy()
+            self.server.update_mask(self.firing_graph)
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
-            self.sampler.patterns = None
+            self.sampler.pattern = None
 
+        print('duration of algorithm: {}s'.format(time.time() - start))
         return self
 
     def predict(self, X):
