@@ -7,7 +7,7 @@ from .patterns import EmptyPattern, YalaBasePattern, YalaPredPattern, YalaDraini
     YalaDrainingPatterns, YalaPredPatterns, YalaOutputSimplePattern
 
 
-def build_firing_graph(sampler, ax_weights, l_transients=None, n_inputs=None, n_outputs=None):
+def build_firing_graph(sampler, ax_weights, n_inputs=None, n_outputs=None):
     """
 
     :param sampler:
@@ -22,7 +22,7 @@ def build_firing_graph(sampler, ax_weights, l_transients=None, n_inputs=None, n_
         )
 
     l_patterns = []
-    if l_transients is None:
+    if sampler.patterns is None:
         for i in range(n_outputs):
             # Add Empty base and sampled intersection into a Yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
@@ -31,7 +31,7 @@ def build_firing_graph(sampler, ax_weights, l_transients=None, n_inputs=None, n_
             ))
 
     else:
-        for i, pattern in enumerate(l_transients):
+        for i, pattern in enumerate(sampler.patterns):
             # Add Empty base and sampled intersection into a Yala structure
             l_patterns.append(YalaDrainingPattern.from_patterns(
                 pattern,
