@@ -202,22 +202,25 @@ class ClassifierSelector(object):
         d_train = self.fold_manager.get_train_data(d_feature_params)
 
         # Instantiate model and fit it
-        model, args = get_model(self.model_classification, d_model_params)
+        model, kwargs = get_model(self.model_classification, d_model_params)
         d_eval = self.fold_manager.get_eval_data(d_feature_params)
 
-        if 'input_shape' in args.keys():
-            args['input_shape'] = d_train['X'].shape[1]
+        if 'input_shape' in kwargs.keys():
+            kwargs['input_shape'] = d_train['X'].shape[1]
 
         if d_train.get('w', None) is not None:
-            args[self.weight_arg] = d_train['w']
+            kwargs[self.weight_arg] = d_train['w']
 
         if d_train.get('s', None) is not None:
-            args[self.scoring_arg] = d_train['s']
+            kwargs[self.scoring_arg] = d_train['s']
+
+        if 'args' in d_feature_params.keys():
+            kwargs.update({arg: d_train[arg] for arg in d_feature_params['args']})
 
         if d_eval is not None:
-            args['eval_set'] = d_eval
+            kwargs['eval_set'] = d_eval
 
-        model.fit(d_train['X'], d_train['y'], **args)
+        model.fit(d_train['X'], d_train['y'], **kwargs)
 
         return model
 

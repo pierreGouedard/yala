@@ -76,13 +76,16 @@ class FoldManager(object):
                 .build(self.df_train, params_features)
 
         X, y = self.feature_builder.transform(self.df_train, target=True)
+        d_train = {"X": X, "y": y}
+
+        d_train.update(self.feature_builder.get_args())
 
         if self.df_weights is not None:
-            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_train.index].values, 's': self.scoring}
+            d_train.update({"w": self.df_weights.loc[self.df_train.index].values, 's': self.scoring})
 
-        return {"X": X, "y": y}
+        return d_train
 
-    def get_eval_data(self, params_features):
+    def get_eval_data(self, params_features, ):
         """
         Build a data set composed of models. The target is also return, if specified.
 
@@ -106,10 +109,12 @@ class FoldManager(object):
                 .build(self.df_train, params_features)
 
         X, y = self.feature_builder.transform(self.df_eval, target=True)
+        d_eval = {"X": X, "y": y}
 
         if self.df_weights is not None:
-            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_eval.index].values,
-                    "eval_function": self.eval_function}
+            return d_eval.update({
+                "w": self.df_weights.loc[self.df_eval.index].values, "eval_function": self.eval_function}
+            )
 
         return {"X": X, "y": y, "eval_function": self.eval_function}
 
@@ -134,11 +139,12 @@ class FoldManager(object):
                 .build(self.df_train, params_features)
 
         X, y = self.feature_builder.transform(self.df_test, target=True)
+        d_test = {"X": X, "y": y}
 
         if self.df_weights is not None:
-            return {"X": X, "y": y, "w": self.df_weights.loc[self.df_test.index].values, 's': self.scoring}
+            return d_test.update({"w": self.df_weights.loc[self.df_test.index].values, 's': self.scoring})
 
-        return {"X": X, "y": y}
+        return d_test
 
     def get_features(self, df):
         """
@@ -216,7 +222,7 @@ class FeatureBuilder(object):
     """
 
     def __init__(
-            self, method=None, cat_cols=None, num_cols=None, target_name='target', target_transform=None, n_label=None
+            self, method=None, cat_cols=None, num_cols=None, target_name='target', target_transform=None, n_label=None,
     ):
         """
 
@@ -231,8 +237,11 @@ class FeatureBuilder(object):
         self.method, self.target_name, self.cat_cols, self.num_cols = method, target_name, cat_cols, num_cols
         self.n_label = n_label
         self.target_transform = target_transform
-
+        self.args = {}
         self.model, self.target_encoder, self.is_built = None, None, None
+
+    def get_args(self):
+        return {k: v for k, v in self.args.items()}
 
     def build(self, df_data=None, params=None, force_train=False):
         """
@@ -254,7 +263,6 @@ class FeatureBuilder(object):
         self : Current instance of the class.
         """
 
-        # Create and fit the TF-IDF if necessary
         if self.model is None or force_train:
 
             if self.method == 'cat_encode':
@@ -264,8 +272,12 @@ class FeatureBuilder(object):
                 self.model.fit(df_data[self.cat_cols])
 
             elif self.method == 'cat_num_encode':
-                self.model = HybridEncoder(num_cols=self.num_cols, cat_cols=self.cat_cols,  **params)
+                self.model = HybridEncoder(
+                    num_cols=self.num_cols, cat_cols=self.cat_cols, params_num_enc=params['params_num_enc'],
+                    params_cat_enc=params['params_cat_enc']
+                )
                 self.model.fit(df_data[self.cat_cols + self.num_cols])
+                self.args['mapping_feature_input'] = self.model.ax_feature_to_input
 
             else:
                 raise ValueError('Method not implemented: {}'.format(self.method))

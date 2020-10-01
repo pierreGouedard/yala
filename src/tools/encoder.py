@@ -64,62 +64,21 @@ class NumEncoder(object):
         :rtype: self
 
         """
-
-        if self.method == 'bounds':
-            self.bins = {i: x for i, x in enumerate(np.linspace(self.bounds[0], self.bounds[1], self.n_bins))}
-
-        elif self.method == 'signal':
-            # Reduce n_bins if necessary and compute bounds
+        if self.method == 'signal':
+            self.bounds = np.quantile(X[~np.isnan(X)], [0.05, 0.95])
             self.n_bins = min(len(np.unique(X)), self.n_bins)
-            ax_bounds = np.quantile(X[~np.isnan(X)], [0.05, 0.95])
 
-            # Fit from bounds
-            self.fit_from_bound(ax_bounds[1], ax_bounds[0])
-
-        else:
-            raise ValueError(
-                'Method to compute bins not understood: {}. choose from {}'.format(self.method, self.bins_method)
-            )
+        self.bins = np.linspace(self.bounds[0], self.bounds[1], num=self.n_bins)
 
         return self
 
-    def fit_from_bound(self, max_, min_, res=1e-4):
-        # Computes bins
-        if max_ - res < min_:
-            max_ = min_
-
-        self.bins = np.linspace(min_, max_, self.n_bins)
-
     def transform(self, ax_continuous):
-        ax_bits = np.hstack((self.bins <= ax_continuous, ax_continuous < self.bins))
-        return csc_matrix(ax_bits)
+        ax_activation = abs(self.bins - ax_continuous)
+        ax_activation = ax_activation == ax_activation.min(axis=1, keepdims=True)
+        return csc_matrix(ax_activation)
 
     def inverse_transform(self, sax_bits, agg='mean'):
-
-        ax_bits = sax_bits.toarray()[0]
-        ax_discrete = np.zeros(ax_bits.shape[0], int(ax_bits.shape[1] / (2 * self.n_bins)))
-
-        for i in range(ax_discrete.shape[0]):
-            for j in range(ax_discrete.shape[1]):
-
-                # Get bounds
-                l_upper_bounds = np.where(ax_bits[((j * 2) + 1) * self.n_bins: (j + 1) * 2 * self.n_bins])[0]
-                l_lower_bounds = np.where(ax_bits[j * 2 * self.n_bins: ((j * 2) + 1) * self.n_bins])[0]
-                l_bounds = [min([self.bins[k] for k in l_upper_bounds]), max([self.bins[k] for k in l_lower_bounds])]
-
-                if agg == 'mean':
-                    ax_discrete[i, j] = np.mean(l_bounds)
-
-                elif agg == 'min':
-                    ax_discrete[i, j] = min(l_bounds)
-
-                elif agg == 'max':
-                    ax_discrete[i, j] = max(l_bounds)
-
-                else:
-                    raise ValueError("choose agg  in {}".format(['mean', 'max', 'min']))
-
-        return ax_discrete
+        raise NotImplementedError
 
     def discretize_value(self, x):
 
@@ -167,10 +126,12 @@ class HybridEncoder():
         # Save cat and numerical columns name or indices
         self.cat_cols = cat_cols
         self.num_cols = num_cols
+        self.ax_feature_to_input = None
 
         # Create encoders
         self.cat_enc = CatEncoder(**params_cat_enc)
-        self.num_encs = {n: NumEncoder(**params_num_enc) for n in num_cols}
+        self.num_encs = {c: NumEncoder(**params_num_enc) for c in num_cols}
+        self.n_bins_num = params_num_enc['n_bins']
         self.map_encoders = None
 
     def fit_transform(self, X, y=None):
@@ -201,9 +162,21 @@ class HybridEncoder():
         # Fit categorical encoder
         self.cat_enc.fit(self.get_array_from_input(X, self.cat_cols))
 
+        # Initialize feature to input mapping
+        n_inputs = sum([len(l_cat) for l_cat in self.cat_enc.categories_]) + len(self.num_cols) * self.n_bins_num
+        self.ax_feature_to_input = np.zeros((n_inputs, len(self.cat_cols) + len(self.num_cols)), dtype=bool)
+
+        # fill feature to input mapping
+        n = 0
+        for i, l_cats in enumerate(self.cat_enc.categories_):
+            self.ax_feature_to_input[range(n, n + len(l_cats)), i] = True
+            n += len(l_cats)
+
         # Fit numerical encoders
-        for ind in self.num_cols:
-            self.num_encs[ind].fit(self.get_array_from_input(X, [ind]))
+        for i, c in enumerate(self.num_cols):
+            self.num_encs[c].fit(self.get_array_from_input(X, [c]))
+            self.ax_feature_to_input[range(n, n + self.n_bins_num), i + len(self.cat_cols)] = True
+            n += self.n_bins_num
 
         return self
 
@@ -212,9 +185,9 @@ class HybridEncoder():
         X_encoded = self.cat_enc.transform(self.get_array_from_input(X, self.cat_cols)).tocsc()
 
         # transform numerical features
-        l_num_encoded = []
-        for ind in self.num_cols:
-            l_num_encoded.append(self.num_encs[ind].transform(self.get_array_from_input(X, [ind])))
+        l_num_encoded, n = [], X_encoded.shape
+        for c in self.num_cols:
+            l_num_encoded.append(self.num_encs[c].transform(self.get_array_from_input(X, [c])))
 
         return hstack([X_encoded] + l_num_encoded)
 

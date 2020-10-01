@@ -56,6 +56,7 @@ params_yala_grid = {}
 params_encoding = {
     'params_num_enc': {'n_bins': 30, 'method': 'signal'},
     'params_cat_enc': {'sparse': True, 'dtype': bool, 'handle_unknown': 'ignore'},
+    'args': ['mapping_feature_input']
 }
 np.random.seed(1234)
 

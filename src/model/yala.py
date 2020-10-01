@@ -1,14 +1,13 @@
 # Global import
 from firing_graph.core.tools.helpers.servers import ArrayServer
-from firing_graph.core.solver.sampler import SupervisedSampler
+from firing_graph.core.tools.helpers.sampler import YalaSampler
 from firing_graph.core.solver.drainer import FiringGraphDrainer
 import numpy as np
-from scipy.sparse import lil_matrix
-import time
+from scipy.sparse import lil_matrix, csc_matrix
 
 # Local import
 from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks
-from .patterns import YalaPredPatterns
+from .patterns import YalaBasePatterns
 
 
 class Yala(object):
@@ -110,7 +109,7 @@ class Yala(object):
 
         return ax_upper_precision.round(3), ax_weights
 
-    def fit(self, X, y, eval_set=None, scoring=None, sample_weight=None):
+    def fit(self, X, y, eval_set=None, scoring=None, sample_weight=None, mapping_feature_input=None):
         """row
 
         :param X:
@@ -119,13 +118,17 @@ class Yala(object):
         :param sample_weight:
         :return:
         """
-
         self.server = ArrayServer(X, y, dropout_mask=self.dropout_mask).stream_features()
-        self.n_inputs, self.n_outputs = X.shape[1], y.shape[1]
+        self.n_inputs = X.shape[1]
+        # TODO: Create encoder
+        # TODO: forget about defining batch size different for sampler, drainer end selection, there is onl one batch_
+        #  size and only 1 max_draining_iteration
         self.batch_size = min(y.shape[0], self.batch_size)
         self.drainer_bs, self.selection_bs = min(y.shape[0], self.drainer_bs), min(y.shape[0], self.selection_bs)
         self.sampler_bs = min(y.shape[0], self.drainer_bs)
-        self.sampler = SupervisedSampler(self.server, self.sampler_bs, self.sampling_rate)
+
+        # New sampler
+        self.sampler = YalaSampler(mapping_feature_input, self.sampling_rate)
 
         # Core loop
         import time
@@ -139,7 +142,7 @@ class Yala(object):
 
             # Initial sampling
             firing_graph = build_firing_graph(
-                self.sampler.generative_sampling(), ax_weights, n_inputs=self.n_inputs, n_outputs=self.n_outputs
+                self.sampler.sample(self.server.n_label), ax_weights, n_inputs=self.n_inputs
             )
             stop, n, l_selected = False, 0, []
 
@@ -154,10 +157,13 @@ class Yala(object):
                     .firing_graph
 
                 # Disclose new patterns
+                # TODO: cannot really test this guy before refactoring sampler properly
+                # TODO: step 1: remove any reference to pred patterns
+                #       step 3: test disclose pattern
                 l_transients, l_selected = disclose_patterns_multi_output(
                     l_selected, self.server, self.selection_bs, firing_graph, self.drainer_params, ax_weights,
                     self.min_firing, self.n_overlap, self.min_precision, self.max_precision, self.min_gain,
-                    self.max_candidate
+                    self.max_candidate, csc_matrix(mapping_feature_input)
                 )
 
                 print("[YALA]: {} pattern disclosed".format(len(l_transients)))
@@ -168,16 +174,12 @@ class Yala(object):
                     # update parameters
                     ax_precision, ax_weights = self.__core_parameters(l_transients)
 
-                    # update pattern for sampler
-                    self.sampler.pattern = YalaPredPatterns.from_pred_patterns(l_transients, keep_output_id=True) \
-                        .isolate_output()
-
                     # Sample
-                    firing_graph = build_firing_graph(self.sampler.discriminative_sampling(), ax_weights, l_transients)
+                    firing_graph = build_firing_graph(self.sampler.sample(len(l_transients)), ax_weights, l_transients)
                     n += 1
 
                     print("[YALA]: {} pattern updated, targeted precision are {}".format(
-                        len(self.sampler.pattern.partitions), ax_precision)
+                        len(l_transients), ax_precision)
                     )
 
             if self.firing_graph is not None:
@@ -186,7 +188,7 @@ class Yala(object):
                 )
 
             else:
-                self.firing_graph = YalaPredPatterns.from_pred_patterns(l_selected, group_id=0)
+                self.firing_graph = YalaBasePatterns.from_patterns(l_selected, group_id=0)
 
             # Escape main loop on last retry condition
             if not len(l_selected) > 0:
@@ -200,25 +202,9 @@ class Yala(object):
             self.server.pattern_mask = self.firing_graph.copy()
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
-            self.sampler.pattern = None
 
         print('duration of algorithm: {}s'.format(time.time() - start))
         return self
-
-    def predict(self, X):
-        """
-
-        :param X:
-        :return:
-        """
-        ax_preds = self.firing_graph.propagate(X).A.astype(int)
-        if ax_preds.shape[1] == 1:
-            ax_preds = ax_preds[:, 0]
-
-        else:
-            raise NotImplementedError
-
-        return ax_preds
 
     def predict_proba(self, X, n_label, min_probas=0.5):
         """
@@ -226,6 +212,7 @@ class Yala(object):
         :param X:
         :return:
         """
+        # TODO: Encode features here
         assert self.firing_graph is not None, "First fit firing graph"
 
         l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
@@ -250,34 +237,3 @@ class Yala(object):
         self.firing_graph.ungroup_output()
 
         return ax_probas
-
-    def predict_score(self, X, n_label, min_score=0):
-        """
-
-        :param X:
-        :return:
-        """
-        assert self.firing_graph is not None, "First fit firing graph"
-
-        l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
-
-        ax_scores = self.firing_graph\
-            .group_output()\
-            .propagate_value(X, [p['score'] for p in l_partitions]).A
-
-        sax_sum = lil_matrix((ax_scores.shape[1], n_label), dtype=bool)
-        for label in range(n_label):
-            l_indices = [p['group_id'] for p in l_partitions if p['label_id'] == label]
-            sax_sum[l_indices, label] = True
-
-        ax_count = sax_sum.sum(axis=0).A[0]
-        ax_scores = ax_scores.clip(min=min_score).dot(sax_sum.A)
-
-        # Merge labels
-        ax_scores = ax_scores.dot(np.eye(n_label) * 2 - np.ones((n_label, n_label)))
-        ax_scores += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count)
-        ax_scores /= ax_count.sum()
-
-        self.firing_graph.ungroup_output()
-
-        return ax_scores
