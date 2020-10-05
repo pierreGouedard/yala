@@ -1,7 +1,7 @@
 # Global import
-from firing_graph.core.tools.helpers.servers import ArrayServer
-from firing_graph.core.tools.helpers.sampler import YalaSampler
-from firing_graph.core.solver.drainer import FiringGraphDrainer
+from firing_graph.tools.helpers.servers import ArrayServer
+from firing_graph.tools.helpers.sampler import YalaSampler
+from firing_graph.solver.drainer import FiringGraphDrainer
 import numpy as np
 from scipy.sparse import lil_matrix, csc_matrix
 
@@ -157,9 +157,6 @@ class Yala(object):
                     .firing_graph
 
                 # Disclose new patterns
-                # TODO: cannot really test this guy before refactoring sampler properly
-                # TODO: step 1: remove any reference to pred patterns
-                #       step 3: test disclose pattern
                 l_transients, l_selected = disclose_patterns_multi_output(
                     l_selected, self.server, self.selection_bs, firing_graph, self.drainer_params, ax_weights,
                     self.min_firing, self.n_overlap, self.min_precision, self.max_precision, self.min_gain,
@@ -183,12 +180,13 @@ class Yala(object):
                     )
 
             if self.firing_graph is not None:
-                self.firing_graph = self.firing_graph.augment(
-                    l_selected, max([p['group_id'] for p in self.firing_graph.partitions]) + 1
+                self.firing_graph = self.firing_graph.augment_from_patterns(
+                    l_selected, output_method='label',
+                    *[('group_id', max([p['group_id'] for p in self.firing_graph.partitions]) + 1)]
                 )
 
             else:
-                self.firing_graph = YalaBasePatterns.from_patterns(l_selected, group_id=0)
+                self.firing_graph = YalaBasePatterns.from_patterns(l_selected, 'label', *[('group_id', 0)])
 
             # Escape main loop on last retry condition
             if not len(l_selected) > 0:
@@ -218,7 +216,7 @@ class Yala(object):
         l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
 
         ax_probas = self.firing_graph\
-            .group_output()\
+            .isolate_group_output()\
             .propagate_value(X, np.array([p['precision'] for p in l_partitions])).A
 
         sax_sum = lil_matrix((ax_probas.shape[1], n_label), dtype=bool)
@@ -234,6 +232,6 @@ class Yala(object):
         ax_probas += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count)
         ax_probas /= ax_count.sum()
 
-        self.firing_graph.ungroup_output()
+        self.firing_graph.gather_group_output()
 
         return ax_probas

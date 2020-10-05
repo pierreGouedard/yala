@@ -1,5 +1,5 @@
 # Global import
-from firing_graph.core.data_structure.utils import create_empty_matrices
+from firing_graph.data_structure.utils import create_empty_matrices
 from scipy.sparse import csc_matrix
 import numpy as np
 import unittest

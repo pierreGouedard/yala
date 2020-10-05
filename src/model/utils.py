@@ -204,34 +204,27 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, mappi
     :return:
     """
     # Get indices of transient and pred patterns
+    index_trans = 1 if len(l_partitions[0]['indices']) == 3 else 0
+    ax_trans_indices = np.hstack([p['indices'][index_trans] for p in l_partitions])
+
+    # Extract base patterns if any
+    if index_trans == 1:
+        l_partitions_base = [{k: p[k] if k != 'indices' else [p['indices'][0]] for k in p.keys()} for p in l_partitions]
+        base_pattern = YalaBasePatterns.from_partitions(l_partitions_base, firing_graph, *[('is_new', False)])\
+            .augment_from_patterns(l_selected, output_method='isolate', *[('is_new', False)])
+    else:
+        base_pattern = None
+
+    print('debug 1')
     import IPython
     IPython.embed()
-    ax_trans_indices = np.hstack([np.array(p['indices'])[p['partitions'][0]['indices']] for p in l_partitions])
-
-    # Extract activation matrices and precision of pred patterns
-    # TODO: the idea is here but it seems unecessarly complicated why 'partitions' in partition, we should just make sure
-    # if 1 index = trans if two index first is pred the other is trans, no need to fucking add this key mother fucker
-    l_partitions_pred = [{
-        'indices': p['indices'][p['partitions'][1]['indices'][0]],
-        "precision": p.get('precision', None), "output_id": p['output_id'], "label_id": p["label_id"]
-    } for i, p in enumerate(l_partitions) if p['partitions'][1]['indices']]
-
-    # TODO: target
-    l_partitions_pred = [{k: p[k] if k != 'indices' else p['indices'][1] for k in p.keys()} for p in l_partitions]
-    pred_pattern = YalaBasePatterns.from_partitions(l_partitions_pred, firing_graph)
-
-    # TODO: old
-    ax_pred_indices = np.hstack([np.array(p['indices'])[p['partitions'][1]['indices']] for p in l_partitions])
-    sax_pred = hstack([firing_graph.I[:, ax_pred_indices]] + [p.I[:, 0] for p in l_selected])
-    l_precisions = [p['partitions'][1]['precision'] for p in l_partitions] + [p.precision for p in l_selected]
-    l_precisions = list(filter(lambda x: x is not None, l_precisions))
-    # TODO: sax_pred == pred_pattern.I
-    #   l_precisions = [p.partitions for p in pred_pattern.partitions]
+    # TODO: Check whether ax_trans_indices is correct  (look at the level)
+    #   Check that base pattern is correct (look at level, depth, input, output)
 
     # Extract input matrices and backward fire count of transient patterns
     sax_weight = firing_graph.Iw[:, ax_trans_indices]
     sax_count = firing_graph.backward_firing['i'][:, ax_trans_indices]
-    ax_target_precisions = np.array([p.get('precision', 0) for p in l_partitions]) + kwargs['min_gain']
+    ax_target_precisions = np.array([p['precision'] for p in l_partitions]) + kwargs['min_gain']
 
     # Compute precision of transient bits organize as its input matrix
     sax_trans_features, sax_trans_input = get_precision(
@@ -239,63 +232,72 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, mappi
         ax_target_precisions, mapping_feature_input
     )
 
+    print('debug 2')
+    import IPython
+    IPython.embed()
+    # TODO: Check at the precision calculation (are they in [0, 1], are any inputs = True, are they shaped correctly)
+
     # Augment Base patterns instead of pasing sax_I, l_precisions, l_levels mother fucker
-    return build_pattern(sax_pred, l_precisions, sax_trans_features, sax_trans_input, mapping_feature_input,
-                         kwargs['max_candidate'])
+    return build_pattern(base_pattern, sax_trans_features, sax_trans_input, mapping_feature_input)
 
 
-def build_pattern(sax_I, l_prec, sax_trans_features, sax_trans_input, mapping_feature_input, max_candidate):
+def build_pattern(base_pattern, sax_trans_features, sax_trans_input, fi_map):
     """
 
-    :param sax_I:
-    :param l_prec:
-    :param sax_trans:
-    :param max_candidate:
-    :return:
     """
     # build candidate input matrix
-    l_inputs, l_updated, l_prec_new = [], [], []
+    l_inputs, l_levels, l_partitions = [], [], []
     for i in range(sax_trans_features.shape[1]):
         sax_cand_features = sax_trans_features[:, i]
         sax_cand_input = sax_trans_input[:, i]
 
         # Get each non zero entry in a single columns
         sax_split_cand_features = diags(sax_cand_features.A.ravel(), format='csc')[:, sax_cand_features.nonzero()[0]]
-        sax_split_cand_input = mapping_feature_input.dot(sax_split_cand_features > 0).astype(bool)
+        sax_split_cand_input = fi_map.dot(sax_split_cand_features > 0).astype(bool)
 
-        import IPython
-        IPython.embed()
         # Reduce input of selected features
         sax_split_cand_input = sax_split_cand_input & sax_cand_input[:, [0] * sax_split_cand_input.shape[1]]
 
-        if sax_split_cand_features.nnz == 0:
+        if sax_split_cand_features.nnz == 0 or sax_split_cand_input.nnz == 0:
             continue
 
         # Append list of precision
-        l_prec_new.extend(list(sax_split_cand_features.sum(axis=0).A[0]))
+        l_partitions.extend(
+            [{"precision": p, "label_id": None, 'score': None} for p in sax_split_cand_features.sum(axis=0).A[0]]
+        )
+        ax_levels = np.ones(sax_split_cand_input.shape[1], dtype=int)
+        print('debug 3')
+        import IPython
+        IPython.embed()
+        # TODO: Check whether candidates are shaped correctly
 
-        if sax_I.shape[1] > 0:
-            # Set to True entries of pred patterns linked to features that has not been selected yet
-            sax_I |= mapping_feature_input.dot(diags(mapping_feature_input.transpose().dot(sax_I[:, i]) == 0))
+        if base_pattern is not None:
+            print('debug 4')
+            import IPython
+            IPython.embed()
+            # TODO: Check whether candidates are shaped correctly and have a correct level
+
+            # Base is the union of input linked to unselected feature and base input
+            sax_unselected = fi_map.transpose().dot(diags(fi_map.transpose().dot(base_pattern.I[:, i]) == 0))
+            sax_I = base_pattern.I[:, i] | sax_unselected
 
             # Create candidates input matrix
-            sax_split_cand_input &= sax_I[:, np.ones(sax_split_cand_input.shape[1], dtype=int) * i]
+            sax_split_cand_input &= sax_I[:, np.zeros(sax_split_cand_input.shape[1], dtype=int)]
 
+            # Increment levels if necessary
+            ax_levels += base_pattern.levels[np.ones(sax_split_cand_input.shape[1], dtype=int) * i]
+            ax_levels -= (sax_unselected.transpose().dot(sax_split_cand_input) == 0).A[0].astype(int)
+
+        # Add candidates input and remove corresponding base pattern
         l_inputs.append(sax_split_cand_input.copy())
-        l_updated.append(i)
+        l_levels.append(list(ax_levels))
+        base_pattern = base_pattern.remove(i)
 
-    # Remove previous pattern that has been updated
-    sax_I = sax_I[:, [i for i in range(sax_I.shape[1]) if i not in l_updated]]
-    l_prec = [p for i, p in enumerate(l_prec) if i not in l_updated]
-
-    # build partition
-    l_partitions = [{"indices": [i], "precision": p, "output_id": i, "is_new": False} for i, p in enumerate(l_prec)]
-    l_partitions.extend([
-        {"indices": [len(l_prec) + i], "precision": p, "output_id": len(l_prec) + i} for i, p in enumerate(l_prec_new)
-    ])
-
-    # TODO: here level should be passsed.
-    return YalaBasePatterns.from_input_matrix(hstack([sax_I] + l_inputs), l_partitions, np.array())
+    print('debug 5')
+    import IPython
+    IPython.embed()
+    # TODO: Check whether the augment from inputs is working correctly
+    return base_pattern.augment_from_inputs(hstack(l_inputs), l_partitions, np.array(l_levels))
 
 
 def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec, mapping_feature_input):
@@ -317,7 +319,7 @@ def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec, mapping_
         .multiply(sax_mask_r.multiply(sax_count_r.dot(diags(ax_p + ax_r, format='csc'))).power(-1))
     sax_precision += (sax_precision > 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
 
-    # Get only precision mask that are larger than ax_prec
+    # Get only precision mask that are larger than target precision (ax_prec)
     precision_mask = sax_precision > (sax_precision > 0).dot(diags(ax_prec, format='csc'))
 
     return sax_precision.multiply(precision_mask), sax_mask

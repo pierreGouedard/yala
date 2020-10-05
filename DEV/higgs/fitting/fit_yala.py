@@ -2,6 +2,8 @@
 import os
 import pandas as pd
 import numpy as np
+import sys
+sys.path.append(os.getcwd())
 
 # Local import
 from settings import models_path, features_path, export_path
