@@ -60,7 +60,7 @@ params_encoding = {
     'params_cat_enc': {'sparse': True, 'dtype': bool, 'handle_unknown': 'ignore'},
     'args': ['mapping_feature_input']
 }
-np.random.seed(1234)
+np.random.seed(234)
 
 # Defined custom output name based on parameters of the script
 name_mdl = '{}'.format(KVName.from_dict(parameters).to_string())

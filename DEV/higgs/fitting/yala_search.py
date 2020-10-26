@@ -5,6 +5,8 @@ import argparse
 import re
 import json
 import numpy as np
+import sys
+sys.path.append(os.getcwd())
 
 # Local import
 from settings import models_path, features_path

@@ -209,17 +209,14 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, mappi
 
     # Extract base patterns if any
     if index_trans == 1:
+
         l_partitions_base = [{k: p[k] if k != 'indices' else [p['indices'][0]] for k in p.keys()} for p in l_partitions]
-        base_pattern = YalaBasePatterns.from_partitions(l_partitions_base, firing_graph, *[('is_new', False)])\
-            .augment_from_patterns(l_selected, output_method='isolate', *[('is_new', False)])
+        base_pattern = YalaBasePatterns.from_partitions(
+            l_partitions_base, firing_graph, 'isolate', *[('is_new', False)]
+        )\
+            .augment_from_patterns(l_selected, 'isolate', *[('is_new', False)])
     else:
         base_pattern = None
-
-    print('debug 1')
-    import IPython
-    IPython.embed()
-    # TODO: Check whether ax_trans_indices is correct  (look at the level)
-    #   Check that base pattern is correct (look at level, depth, input, output)
 
     # Extract input matrices and backward fire count of transient patterns
     sax_weight = firing_graph.Iw[:, ax_trans_indices]
@@ -232,12 +229,7 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, mappi
         ax_target_precisions, mapping_feature_input
     )
 
-    print('debug 2')
-    import IPython
-    IPython.embed()
-    # TODO: Check at the precision calculation (are they in [0, 1], are any inputs = True, are they shaped correctly)
-
-    # Augment Base patterns instead of pasing sax_I, l_precisions, l_levels mother fucker
+    # Augment Base patterns instead of passing sax_I, l_precisions, l_levels mother fucker
     return build_pattern(base_pattern, sax_trans_features, sax_trans_input, mapping_feature_input)
 
 
@@ -246,7 +238,7 @@ def build_pattern(base_pattern, sax_trans_features, sax_trans_input, fi_map):
 
     """
     # build candidate input matrix
-    l_inputs, l_levels, l_partitions = [], [], []
+    l_inputs, l_levels, l_partitions, n_cand, n_base = [], [], [], 0, 0
     for i in range(sax_trans_features.shape[1]):
         sax_cand_features = sax_trans_features[:, i]
         sax_cand_input = sax_trans_input[:, i]
@@ -256,48 +248,52 @@ def build_pattern(base_pattern, sax_trans_features, sax_trans_input, fi_map):
         sax_split_cand_input = fi_map.dot(sax_split_cand_features > 0).astype(bool)
 
         # Reduce input of selected features
-        sax_split_cand_input = sax_split_cand_input & sax_cand_input[:, [0] * sax_split_cand_input.shape[1]]
+        sax_split_cand_input = sax_split_cand_input.multiply(sax_cand_input[:, [0] * sax_split_cand_input.shape[1]])
 
         if sax_split_cand_features.nnz == 0 or sax_split_cand_input.nnz == 0:
+            n_base += 1
             continue
 
         # Append list of precision
         l_partitions.extend(
-            [{"precision": p, "label_id": None, 'score': None} for p in sax_split_cand_features.sum(axis=0).A[0]]
+            [{"precision": p, 'score': None, "output_id": n_cand + n, 'indices': [n_cand + n], "label_id": None}
+             for n, p in enumerate(sax_split_cand_features.sum(axis=0).A[0])]
         )
         ax_levels = np.ones(sax_split_cand_input.shape[1], dtype=int)
-        print('debug 3')
-        import IPython
-        IPython.embed()
-        # TODO: Check whether candidates are shaped correctly
+        n_cand += sax_split_cand_features.shape[1]
 
         if base_pattern is not None:
-            print('debug 4')
-            import IPython
-            IPython.embed()
-            # TODO: Check whether candidates are shaped correctly and have a correct level
 
-            # Base is the union of input linked to unselected feature and base input
-            sax_unselected = fi_map.transpose().dot(diags(fi_map.transpose().dot(base_pattern.I[:, i]) == 0))
-            sax_I = base_pattern.I[:, i] | sax_unselected
+            sax_base = base_pattern.I[:, [n_base] * sax_split_cand_input.shape[1]]
 
-            # Create candidates input matrix
-            sax_split_cand_input &= sax_I[:, np.zeros(sax_split_cand_input.shape[1], dtype=int)]
+            # Get candidates with input that overlap with base
+            ax_overlap = sax_split_cand_input.transpose().dot(base_pattern.I[:, n_base]).A.ravel()
+            sax_cand_input_mask = fi_map.dot(sax_split_cand_features > 0)
+
+            # Find a correct descriptive comment about operations below
+            sax_I = ((sax_base - sax_cand_input_mask.astype(int) > 0) + sax_split_cand_input).multiply(sax_base)
+            sax_split_cand_input = sax_I + sax_split_cand_input.dot(diags(~ax_overlap, dtype=bool, format='csc'))
 
             # Increment levels if necessary
-            ax_levels += base_pattern.levels[np.ones(sax_split_cand_input.shape[1], dtype=int) * i]
-            ax_levels -= (sax_unselected.transpose().dot(sax_split_cand_input) == 0).A[0].astype(int)
+            ax_levels += base_pattern.levels[[n_base] * ax_levels.shape[0]] - ax_overlap
+
+            # Remove old base pattern
+            base_pattern = base_pattern.remove(n_base, 'isolate', *[('is_new', False)])
 
         # Add candidates input and remove corresponding base pattern
         l_inputs.append(sax_split_cand_input.copy())
-        l_levels.append(list(ax_levels))
-        base_pattern = base_pattern.remove(i)
+        l_levels.extend(list(ax_levels))
 
-    print('debug 5')
-    import IPython
-    IPython.embed()
-    # TODO: Check whether the augment from inputs is working correctly
-    return base_pattern.augment_from_inputs(hstack(l_inputs), l_partitions, np.array(l_levels))
+    if base_pattern is None:
+        if l_inputs:
+            return YalaBasePatterns.from_input_matrix(hstack(l_inputs), l_partitions, np.array(l_levels))
+        else:
+            return None
+
+    if l_inputs:
+        return base_pattern.augment_from_inputs(hstack(l_inputs), l_partitions, np.array(l_levels), 'isolate')
+    else:
+        return base_pattern
 
 
 def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec, mapping_feature_input):
@@ -310,19 +306,22 @@ def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec, mapping_
     """
     # Create mask candidate
     sax_mask = (sax_weight > 0)
+    sax_regul = mapping_feature_input.transpose().astype(int).dot(sax_mask)
     sax_weight_r = mapping_feature_input.transpose().dot(sax_weight.multiply(sax_mask))
     sax_count_r = mapping_feature_input.transpose().dot(sax_count.multiply(sax_mask))
     sax_mask_r = (sax_weight_r > 0).multiply(sax_count_r >= n0)
 
     # compute precision: (original formula: float(score - weight) / (t * (p + r)) + float(p) / (p + r))
-    sax_precision = (sax_weight_r.multiply(sax_mask_r) - (sax_mask_r.dot(diags(ax_w, format='csc'))))\
+    # TODO: Other solution:  compute prec at input level then select correct prec and then compute freq at
+    #  feature level with the selected input.
+    sax_precision = (sax_weight_r.multiply(sax_mask_r) - (sax_mask_r.multiply(sax_regul).dot(diags(ax_w, format='csc'))))\
         .multiply(sax_mask_r.multiply(sax_count_r.dot(diags(ax_p + ax_r, format='csc'))).power(-1))
     sax_precision += (sax_precision > 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
 
     # Get only precision mask that are larger than target precision (ax_prec)
     precision_mask = sax_precision > (sax_precision > 0).dot(diags(ax_prec, format='csc'))
 
-    return sax_precision.multiply(precision_mask), sax_mask
+    return sax_precision.multiply(precision_mask), sax_mask.multiply(mapping_feature_input.dot(precision_mask))
 
 
 def update_overlap_mask(sax_base, sax_patterns, overlap):

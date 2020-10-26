@@ -3,7 +3,9 @@ import os
 import pandas as pd
 import pickle
 import numpy as np
-import time
+import sys
+sys.path.append(os.getcwd())
+
 # Local import
 from settings import models_path, features_path, submission_path
 from src.dev.names import KVName
@@ -32,9 +34,6 @@ name_mdl = '{}'.format(KVName.from_dict({'model': parameters['model']}).to_strin
 with open(os.path.join(inputs['model']['path'], inputs['model']['name']).format(name_mdl), 'rb') as handle:
     classifier = pickle.load(handle)
 
-import IPython
-IPython.embed()
-
 # Load test features
 df_test = pd.read_csv(os.path.join(inputs['test']['path'], inputs['test']['name']), index_col="EventId")
 
@@ -56,6 +55,8 @@ if parameters['n_label'] == 1:
             .loc[:, ['EventId', 'RankOrder', 'Class']]
 
 else:
+    import IPython
+    IPython.embed()
     df_probas = df_probas.loc[:, 's']\
         .sort_values(ascending=False) \
         .to_frame('Class') \
@@ -65,6 +66,7 @@ else:
         ) \
         .reset_index() \
         .loc[:, ['EventId', 'RankOrder', 'Class']]
+
 
 
 for t in [0.14, 0.15, 0.16]:

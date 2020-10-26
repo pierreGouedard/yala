@@ -110,7 +110,8 @@ class Yala(object):
         return ax_upper_precision.round(3), ax_weights
 
     def fit(self, X, y, eval_set=None, scoring=None, sample_weight=None, mapping_feature_input=None):
-        """row
+        """
+        row
 
         :param X:
         :param y:
@@ -144,11 +145,10 @@ class Yala(object):
             firing_graph = build_firing_graph(
                 self.sampler.sample(self.server.n_label), ax_weights, n_inputs=self.n_inputs
             )
-            stop, n, l_selected = False, 0, []
+            stop, n, l_selected, n_debug = False, 0, [], 0
 
             # Core loop
             while not stop:
-
                 # Drain firing graph
                 firing_graph = FiringGraphDrainer(
                     firing_graph, self.server, self.drainer_bs, **self.drainer_params
@@ -163,6 +163,26 @@ class Yala(object):
                     self.max_candidate, csc_matrix(mapping_feature_input)
                 )
 
+                # Debug script
+                print(f"{len(l_transients)} transients and  {len(l_selected)} selected")
+                for i, p in enumerate(l_transients):
+                    yhat = p.propagate(X).tocsc()[:, p.output_id].A[:, 0]
+                    prec = yhat.astype(int).dot(y[:, p.label_id].A[:, 0]) / yhat.sum()
+                    if np.isnan(prec):
+                        import IPython
+                        IPython.embed()
+
+                    print(f"transient {i} has level {p.levels}, thry prec {p.precision} and act prec {prec}")
+
+                for i, p in enumerate(l_selected):
+                    yhat = p.propagate(X).tocsc()[:, p.output_id].A[:, 0]
+                    prec = yhat.astype(int).dot(y[:, p.label_id].A[:, 0]) / yhat.sum()
+                    if np.isnan(prec):
+                        import IPython
+                        IPython.embed()
+
+                    print(f"selected {i} has level {p.levels}, thry prec {p.precision} and act prec {prec}")
+
                 print("[YALA]: {} pattern disclosed".format(len(l_transients)))
                 stop = (len(l_transients) == 0)
 
@@ -172,7 +192,9 @@ class Yala(object):
                     ax_precision, ax_weights = self.__core_parameters(l_transients)
 
                     # Sample
-                    firing_graph = build_firing_graph(self.sampler.sample(len(l_transients)), ax_weights, l_transients)
+                    firing_graph = build_firing_graph(
+                        self.sampler.sample(len(l_transients), l_transients), ax_weights, l_transients
+                    )
                     n += 1
 
                     print("[YALA]: {} pattern updated, targeted precision are {}".format(
@@ -181,7 +203,7 @@ class Yala(object):
 
             if self.firing_graph is not None:
                 self.firing_graph = self.firing_graph.augment_from_patterns(
-                    l_selected, output_method='label',
+                    l_selected, 'label',
                     *[('group_id', max([p['group_id'] for p in self.firing_graph.partitions]) + 1)]
                 )
 
@@ -210,18 +232,19 @@ class Yala(object):
         :param X:
         :return:
         """
+
         # TODO: Encode features here
         assert self.firing_graph is not None, "First fit firing graph"
-
         l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
 
+        # group_id in partition
         ax_probas = self.firing_graph\
-            .isolate_group_output()\
+            .reset_output(l_outputs=[p['group_id'] * 2 + p['label_id'] for p in self.firing_graph.partitions])\
             .propagate_value(X, np.array([p['precision'] for p in l_partitions])).A
 
         sax_sum = lil_matrix((ax_probas.shape[1], n_label), dtype=bool)
         for label in range(n_label):
-            l_indices = [p['group_id'] for p in l_partitions if p['label_id'] == label]
+            l_indices = [p['group_id'] * 2 + p['label_id'] for p in l_partitions if p['label_id'] == label]
             sax_sum[l_indices, label] = True
 
         ax_count = sax_sum.sum(axis=0).A[0]
@@ -232,6 +255,6 @@ class Yala(object):
         ax_probas += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count)
         ax_probas /= ax_count.sum()
 
-        self.firing_graph.gather_group_output()
+        self.firing_graph.reset_output(key='label_id')
 
         return ax_probas

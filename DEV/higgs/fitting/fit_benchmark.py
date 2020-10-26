@@ -1,7 +1,8 @@
 # Global import
 import os
 import pandas as pd
-import json
+import sys
+sys.path.append(os.getcwd())
 
 # Local import
 from settings import models_path, features_path, export_path

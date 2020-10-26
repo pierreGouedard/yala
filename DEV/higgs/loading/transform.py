@@ -1,6 +1,8 @@
 # Global import
 import os
 import pandas as pd
+import sys
+sys.path.append(os.getcwd())
 
 # Local import
 from settings import raw_path, features_path
