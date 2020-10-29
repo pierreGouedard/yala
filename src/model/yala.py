@@ -163,26 +163,6 @@ class Yala(object):
                     self.max_candidate, csc_matrix(mapping_feature_input)
                 )
 
-                # Debug script
-                print(f"{len(l_transients)} transients and  {len(l_selected)} selected")
-                for i, p in enumerate(l_transients):
-                    yhat = p.propagate(X).tocsc()[:, p.output_id].A[:, 0]
-                    prec = yhat.astype(int).dot(y[:, p.label_id].A[:, 0]) / yhat.sum()
-                    if np.isnan(prec):
-                        import IPython
-                        IPython.embed()
-
-                    print(f"transient {i} has level {p.levels}, thry prec {p.precision} and act prec {prec}")
-
-                for i, p in enumerate(l_selected):
-                    yhat = p.propagate(X).tocsc()[:, p.output_id].A[:, 0]
-                    prec = yhat.astype(int).dot(y[:, p.label_id].A[:, 0]) / yhat.sum()
-                    if np.isnan(prec):
-                        import IPython
-                        IPython.embed()
-
-                    print(f"selected {i} has level {p.levels}, thry prec {p.precision} and act prec {prec}")
-
                 print("[YALA]: {} pattern disclosed".format(len(l_transients)))
                 stop = (len(l_transients) == 0)
 
@@ -219,9 +199,10 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.pattern_mask = self.firing_graph.copy()
+            self.server.update_mask(self.firing_graph.copy())
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
+            self.server.update_mask(self.firing_graph)
 
         print('duration of algorithm: {}s'.format(time.time() - start))
         return self
@@ -232,27 +213,27 @@ class Yala(object):
         :param X:
         :return:
         """
-
         # TODO: Encode features here
         assert self.firing_graph is not None, "First fit firing graph"
         l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
 
         # group_id in partition
-        ax_probas = self.firing_graph\
+        sax_probas = self.firing_graph\
             .reset_output(l_outputs=[p['group_id'] * 2 + p['label_id'] for p in self.firing_graph.partitions])\
-            .propagate_value(X, np.array([p['precision'] for p in l_partitions])).A
+            .propagate_value(X, np.array([p['precision'] for p in l_partitions]))
 
-        sax_sum = lil_matrix((ax_probas.shape[1], n_label), dtype=bool)
+        sax_sum = lil_matrix((sax_probas.shape[1], n_label), dtype=bool)
         for label in range(n_label):
             l_indices = [p['group_id'] * 2 + p['label_id'] for p in l_partitions if p['label_id'] == label]
             sax_sum[l_indices, label] = True
 
-        ax_count = sax_sum.sum(axis=0).A[0]
-        ax_probas = ax_probas.clip(min=min_probas).dot(sax_sum.A)
+        ax_count = sax_sum.sum(axis=0).A
+        ax_probas = sax_probas.dot(sax_sum).A
+        ax_probas += (ax_count.repeat(sax_probas.shape[0], axis=0) - (sax_probas > 0).dot(sax_sum).A) * 0.5
 
         # Merge labels
         ax_probas = ax_probas.dot(np.eye(n_label) * 2 - np.ones((n_label, n_label)))
-        ax_probas += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count)
+        ax_probas += (np.eye(n_label) * -1 + np.ones((n_label, n_label))).dot(ax_count[0])
         ax_probas /= ax_count.sum()
 
         self.firing_graph.reset_output(key='label_id')

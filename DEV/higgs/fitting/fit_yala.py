@@ -49,9 +49,9 @@ params_folds = {
 }
 
 params_yala = {
-    'sampling_rate': 0.5, 'max_iter': 100, 'min_gain': 1e-3, 'batch_size': 90000,
+    'sampling_rate': 0.5, 'max_iter': 1000, 'min_gain': 1e-3, 'batch_size': 90000,
     'drainer_bs': 30000, 'min_firing': 100, 'min_precision': 0.85, 'max_retry': 5,
-    'dropout_mask': 0.9, "max_candidate": 100, 'n_overlap': 50
+    'dropout_mask': 0.9, "max_candidate": 200, 'n_overlap': 50
 }
 
 params_yala_grid = {}

@@ -55,8 +55,6 @@ if parameters['n_label'] == 1:
             .loc[:, ['EventId', 'RankOrder', 'Class']]
 
 else:
-    import IPython
-    IPython.embed()
     df_probas = df_probas.loc[:, 's']\
         .sort_values(ascending=False) \
         .to_frame('Class') \
@@ -68,7 +66,8 @@ else:
         .loc[:, ['EventId', 'RankOrder', 'Class']]
 
 
-
+import IPython
+IPython.embed()
 for t in [0.14, 0.15, 0.16]:
     parameters['treshold'] = t
     name_submission = '{}'.format(KVName.from_dict(parameters).to_string())
