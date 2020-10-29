@@ -34,7 +34,7 @@ class Yala(object):
                  max_precision=None,
                  n_overlap=100,
                  init_eval_score=0,
-                 dropout_mask=0.2,
+                 dropout_rate_mask=0.2,
                  max_candidate=100
                  ):
 
@@ -46,7 +46,7 @@ class Yala(object):
         self.margin = margin
         self.min_precision = min_precision
         self.eval_score = init_eval_score
-        self.dropout_mask = dropout_mask
+        self.dropout_rate_mask = dropout_rate_mask
         self.max_candidate = max_candidate
 
         if max_precision is None:
@@ -119,7 +119,7 @@ class Yala(object):
         :param sample_weight:
         :return:
         """
-        self.server = ArrayServer(X, y, dropout_mask=self.dropout_mask).stream_features()
+        self.server = ArrayServer(X, y, dropout_rate_mask=self.dropout_rate_mask).stream_features()
         self.n_inputs = X.shape[1]
         # TODO: Create encoder
         # TODO: forget about defining batch size different for sampler, drainer end selection, there is onl one batch_
@@ -199,10 +199,9 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.update_mask(self.firing_graph.copy())
+            self.server.update_mask(YalaBasePatterns.from_patterns(l_selected, output_method='label'))
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
-            self.server.update_mask(self.firing_graph)
 
         print('duration of algorithm: {}s'.format(time.time() - start))
         return self
