@@ -25,9 +25,7 @@ class Yala(object):
                  max_retry=5,
                  min_gain=1e-3,
                  margin=2e-2,
-                 drainer_bs=500,
-                 selection_bs=None,
-                 sampler_bs=None,
+                 draining_size=500,
                  batch_size=1000,
                  min_firing=10,
                  min_precision=0.75,
@@ -35,7 +33,6 @@ class Yala(object):
                  n_overlap=100,
                  init_eval_score=0,
                  dropout_rate_mask=0.2,
-                 max_candidate=100
                  ):
 
         # Core parameter of the algorithm
@@ -47,24 +44,13 @@ class Yala(object):
         self.min_precision = min_precision
         self.eval_score = init_eval_score
         self.dropout_rate_mask = dropout_rate_mask
-        self.max_candidate = max_candidate
 
         if max_precision is None:
             self.max_precision = 1 - (2 * self.min_gain)
         else:
             self.max_precision = max_precision
 
-        self.drainer_bs = drainer_bs
-        if selection_bs is None:
-            self.selection_bs = drainer_bs
-        else:
-            self.selection_bs = selection_bs
-
-        if sampler_bs is None:
-            self.sampler_bs = drainer_bs
-        else:
-            self.sampler_bs = sampler_bs
-
+        self.draining_size = draining_size
         self.batch_size = batch_size
 
         # Core attributes
@@ -125,8 +111,7 @@ class Yala(object):
         # TODO: forget about defining batch size different for sampler, drainer end selection, there is onl one batch_
         #  size and only 1 max_draining_iteration
         self.batch_size = min(y.shape[0], self.batch_size)
-        self.drainer_bs, self.selection_bs = min(y.shape[0], self.drainer_bs), min(y.shape[0], self.selection_bs)
-        self.sampler_bs = min(y.shape[0], self.drainer_bs)
+        self.draining_size = min(y.shape[0], self.draining_size)
 
         # New sampler
         self.sampler = YalaSampler(mapping_feature_input, self.sampling_rate)
@@ -151,16 +136,16 @@ class Yala(object):
             while not stop:
                 # Drain firing graph
                 firing_graph = FiringGraphDrainer(
-                    firing_graph, self.server, self.drainer_bs, **self.drainer_params
+                    firing_graph, self.server, self.batch_size, **self.drainer_params
                 )\
-                    .drain_all(n_max=self.batch_size)\
+                    .drain_all(n_max=self.draining_size)\
                     .firing_graph
 
                 # Disclose new patterns
                 l_transients, l_selected = disclose_patterns_multi_output(
-                    l_selected, self.server, self.selection_bs, firing_graph, self.drainer_params, ax_weights,
+                    l_selected, self.server, self.batch_size, firing_graph, self.drainer_params, ax_weights,
                     self.min_firing, self.n_overlap, self.min_precision, self.max_precision, self.min_gain,
-                    self.max_candidate, csc_matrix(mapping_feature_input)
+                    csc_matrix(mapping_feature_input)
                 )
 
                 print("[YALA]: {} pattern disclosed".format(len(l_transients)))

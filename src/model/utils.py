@@ -78,7 +78,7 @@ def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
 
 def disclose_patterns_multi_output(
         l_completes, server, batch_size, firing_graph, drainer_params, ax_weights, min_firing,
-        n_overlap, min_precision, max_precision, min_gain, max_candidate, mapping_feature_input
+        n_overlap, min_precision, max_precision, min_gain, mapping_feature_input
 ):
     """
 
@@ -108,8 +108,7 @@ def disclose_patterns_multi_output(
         l_indices = [p['output_id'] for p in l_partition_sub]
         kwargs = {
             'weight': ax_weights[l_indices], 'p': drainer_params['p'][l_indices], 'r': drainer_params['r'][l_indices],
-            "min_precision": min_precision, 'max_precision': max_precision, 'min_gain': min_gain,
-            "max_candidate": max_candidate, 'label_id': i
+            "min_precision": min_precision, 'max_precision': max_precision, 'min_gain': min_gain, 'label_id': i
         }
         l_partials_, l_completes_ = disclose_patterns(
             sax_i, l_completes_sub, l_partition_sub, firing_graph, n_overlap, min_firing, mapping_feature_input,
