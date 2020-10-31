@@ -59,6 +59,7 @@ params_yala = {
 params_encoding = {
     'params_num_enc': {'n_bins': 30, 'method': 'signal'},
     'params_cat_enc': {'sparse': True, 'dtype': bool, 'handle_unknown': 'ignore'},
+    'args': ['mapping_feature_input']
 }
 np.random.seed(1234)
 
@@ -102,6 +103,7 @@ def fit_model(model_path, stats_path):
 
 
 def parse_args():
+
     pattern_args = re.compile(r"^[aA-zZ]*=([aA-zZ]|[0-9]|\.)*$")
     parser = argparse.ArgumentParser(description="search")
 
