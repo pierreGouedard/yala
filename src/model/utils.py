@@ -211,9 +211,9 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, mappi
 
         l_partitions_base = [{k: p[k] if k != 'indices' else [p['indices'][0]] for k in p.keys()} for p in l_partitions]
         base_pattern = YalaBasePatterns.from_partitions(
-            l_partitions_base, firing_graph, 'isolate', *[('is_new', False)]
+            l_partitions_base, firing_graph, 'isolate', **{'is_new': False}
         )\
-            .augment_from_patterns(l_selected, 'isolate', *[('is_new', False)])
+            .augment_from_patterns(l_selected, 'isolate', **{'is_new': False})
     else:
         base_pattern = None
 
@@ -277,7 +277,7 @@ def build_pattern(base_pattern, sax_trans_features, sax_trans_input, fi_map):
             ax_levels += base_pattern.levels[[n_base] * ax_levels.shape[0]] - ax_overlap
 
             # Remove old base pattern
-            base_pattern = base_pattern.remove(n_base, 'isolate', *[('is_new', False)])
+            base_pattern = base_pattern.remove(n_base, 'isolate', **{'is_new': False})
 
         # Add candidates input and remove corresponding base pattern
         l_inputs.append(sax_split_cand_input.copy())

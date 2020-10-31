@@ -168,12 +168,11 @@ class Yala(object):
 
             if self.firing_graph is not None:
                 self.firing_graph = self.firing_graph.augment_from_patterns(
-                    l_selected, 'label',
-                    *[('group_id', max([p['group_id'] for p in self.firing_graph.partitions]) + 1)]
+                    l_selected, 'same', **{'group_id': max([p['group_id'] for p in self.firing_graph.partitions]) + 1}
                 )
 
             else:
-                self.firing_graph = YalaBasePatterns.from_patterns(l_selected, 'label', *[('group_id', 0)])
+                self.firing_graph = YalaBasePatterns.from_patterns(l_selected, 'same', **{'group_id': 0})
 
             # Escape main loop on last retry condition
             if not len(l_selected) > 0:
@@ -184,7 +183,7 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.update_mask(YalaBasePatterns.from_patterns(l_selected, output_method='label'))
+            self.server.update_mask(YalaBasePatterns.from_patterns(l_selected, output_method='same'))
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
 
