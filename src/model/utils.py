@@ -304,15 +304,13 @@ def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec, mapping_
     :return:
     """
     # Create mask candidate
-    sax_mask = (sax_weight > 0)
+    sax_mask = (sax_weight > 0).multiply(sax_count > 0)
     sax_regul = mapping_feature_input.transpose().astype(int).dot(sax_mask)
     sax_weight_r = mapping_feature_input.transpose().dot(sax_weight.multiply(sax_mask))
     sax_count_r = mapping_feature_input.transpose().dot(sax_count.multiply(sax_mask))
     sax_mask_r = (sax_weight_r > 0).multiply(sax_count_r >= n0)
 
     # compute precision: (original formula: float(score - weight) / (t * (p + r)) + float(p) / (p + r))
-    # TODO: Other solution:  compute prec at input level then select correct prec and then compute freq at
-    #  feature level with the selected input.
     sax_precision = (sax_weight_r.multiply(sax_mask_r) - (sax_mask_r.multiply(sax_regul).dot(diags(ax_w, format='csc'))))\
         .multiply(sax_mask_r.multiply(sax_count_r.dot(diags(ax_p + ax_r, format='csc'))).power(-1))
     sax_precision += (sax_precision > 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))

@@ -253,7 +253,8 @@ class YalaBasePatterns(FiringGraph):
         sax_I = hstack([self.I, sax_I])
         l_partitions = self.partitions + [dict(
             indices=[self.C.shape[0] + i], depth=2, precision=p['precision'], score=p['score'], label_id=p['label_id'],
-            output_id={'isolate': i, 'label': p['label_id']}.get(output_method, p['output_id']), **kwargs
+            output_id={'isolate': self.C.shape[0] + i, 'label': p['label_id']}.get(output_method, p['output_id']),
+            **kwargs
         ) for i, p in enumerate(l_partitions)]
 
         # Set number of output
