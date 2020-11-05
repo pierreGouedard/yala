@@ -227,7 +227,8 @@ def get_candidate_pred(l_selected, l_partitions, firing_graph, min_firing, mappi
         sax_weight.astype(float), sax_count.astype(float), kwargs['p'], kwargs['r'], kwargs['weight'], min_firing,
         ax_target_precisions, mapping_feature_input
     )
-
+    import IPython
+    IPython.embed()
     # Augment Base patterns instead of passing sax_I, l_precisions, l_levels mother fucker
     return build_pattern(base_pattern, sax_trans_features, sax_trans_input, mapping_feature_input)
 
@@ -243,27 +244,35 @@ def build_pattern(base_pattern, sax_trans_features, sax_trans_input, fi_map):
         sax_cand_input = sax_trans_input[:, i]
 
         # Get each non zero entry in a single columns
-        sax_split_cand_features = diags(sax_cand_features.A.ravel(), format='csc')[:, sax_cand_features.nonzero()[0]]
-        sax_split_cand_input = fi_map.dot(sax_split_cand_features > 0).astype(bool)
-
-        # Reduce input of selected features
-        sax_split_cand_input = sax_split_cand_input.multiply(sax_cand_input[:, [0] * sax_split_cand_input.shape[1]])
-
-        if sax_split_cand_features.nnz == 0 or sax_split_cand_input.nnz == 0:
+        # TODO: here keep the 'k' best authotized k = 1 only
+        k = min(2, sax_cand_features.nnz)
+        if k == 0:
             n_base += 1
             continue
 
-        # Append list of precision
+        sax_cand_features = sax_cand_features.multipy(sax_cand_features >= np.sort(sax_cand_features.data)[-k])
+        sax_cand_features = diags(sax_cand_features.A.ravel(), format='csc')[:, sax_cand_features.nonzero()[0]]
+        sax_cand_mask = fi_map.dot(sax_cand_features > 0).astype(bool)
+
+        # Reduce input of selected features
+        sax_cand_input = hstack((
+            sax_cand_mask.multiply(sax_cand_input[:, [0] * k]),
+            (sax_cand_mask.astype(int) - sax_cand_input[:, [0] * k] > 0)
+        )).dot(csc_matrix(generate_it(k)))
+
+        ax_levels = np.arange(k, dtype=int) * k + 1
         l_partitions.extend(
             [{"precision": p, 'score': None, "output_id": n_cand + n, 'indices': [n_cand + n], "label_id": None}
-             for n, p in enumerate(sax_split_cand_features.sum(axis=0).A[0])]
+             for n, p in enumerate(sax_cand_features.A[0])]
         )
-        ax_levels = np.ones(sax_split_cand_input.shape[1], dtype=int)
-        n_cand += sax_split_cand_features.shape[1]
+        n_cand += k + 1
+
+        # TODO see how to infer the fucking precision, the rest should remain more or less the same
+        # Append list of precision
 
         if base_pattern is not None:
 
-            sax_base = base_pattern.I[:, [n_base] * sax_split_cand_input.shape[1]]
+            sax_base = base_pattern.I[:, [n_base] * (k + 1)]
 
             # Get candidates with input that overlap with base
             ax_overlap = sax_split_cand_input.transpose().dot(base_pattern.I[:, n_base]).A.ravel()

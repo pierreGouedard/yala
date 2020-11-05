@@ -190,6 +190,25 @@ class Yala(object):
         print('duration of algorithm: {}s'.format(time.time() - start))
         return self
 
+    def predict_proba_new(self, X, n_label, min_probas=0.5):
+        """
+
+        :param X:
+        :return:
+        """
+        assert self.firing_graph is not None, "First fit firing graph"
+        l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
+
+        # group_id in partition
+        ax_probas = self.firing_graph\
+            .propagate_value(X, np.array([p['precision'] for p in l_partitions])).A
+
+        # Merge labels
+        ax_probas = ax_probas.dot(np.eye(n_label) * 2 - np.ones((n_label, n_label)))
+        ax_probas = (ax_probas + 1) / 2
+
+        return ax_probas
+
     def predict_proba(self, X, n_label, min_probas=0.5):
         """
 
