@@ -1,138 +1,12 @@
 # Global imports
 import numpy as np
-from scipy.sparse import lil_matrix, hstack, eye
+from scipy.sparse import lil_matrix, hstack, vstack, eye, diags, csc_matrix
+from dataclasses import dataclass
 
 # Local import
 from firing_graph.data_structure.graph import FiringGraph
-from firing_graph.data_structure.utils import create_empty_matrices, add_core_vertices, reduce_matrices, \
-    reduce_backward_firing, augment_matrices, set_matrices_spec
-
-
-class EmptyPattern(FiringGraph):
-
-    def __init__(self, n_inputs, n_outputs, label_id, output_id, **kwargs):
-
-        self.n_inputs, self.n_outputs, self.size = n_inputs, n_outputs, 0
-        self.label_id, self.output_id = label_id, output_id
-        kwargs.update({
-            'project': 'EmptyPattern', 'ax_levels': np.array([]), 'depth': 0, 'precision': 0,
-            'matrices': create_empty_matrices(n_inputs, n_outputs, self.size)
-        })
-
-        # Invoke parent constructor
-        super(EmptyPattern, self).__init__(**kwargs)
-
-
-class YalaBasePattern(FiringGraph):
-    """
-    This class implement the main data structure used for fitting data. It is composed of weighted link in the form of
-    scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
-    track of the firing of vertices.
-
-    """
-    def __init__(self, n_inputs, n_outputs, label_id, output_id, **kwargs):
-
-        self.n_inputs, self.n_outputs, self.size = n_inputs, n_outputs, 1
-        self.label_id, self.output_id = label_id, output_id
-
-        kwargs.update({'project': 'YalaBasePattern', 'depth': 2})
-
-        # Invoke parent constructor
-        super(YalaBasePattern, self).__init__(**kwargs)
-
-    @staticmethod
-    def from_dict(d_struct, **graph_kwargs):
-
-        return YalaBasePattern(
-            n_inputs=d_struct['n_inputs'], n_outputs=d_struct['n_outputs'], label_id=d_struct['label_id'],
-            output_id=d_struct['output_id'], **graph_kwargs
-        )
-
-    @staticmethod
-    def from_partition(partition, firing_graph, label_id=None, output_id=None, add_backward_firing=False):
-
-        # In case of empty partition, stop
-        if len(partition['indices']) == 0:
-            return None
-
-        # Initialize matrices
-        label_id = label_id if label_id is not None else partition['label_id']
-        output_id = output_id if output_id is not None else partition['output_id']
-        d_matrices = reduce_matrices(firing_graph.matrices, partition['indices'])
-
-        # Set levels and output link
-        ax_levels = firing_graph.levels[partition['indices']]
-        d_matrices['Ow'] = d_matrices['Ow'].tolil()
-        d_matrices['Ow'][0, output_id] = 1
-
-        # Add kwargs
-        kwargs = {
-            'partitions': partition.get('partitions', None), 'precision': partition.get('precision', None),
-            'ax_levels': ax_levels, 'matrices': d_matrices, 'score': partition.get('score', None)
-        }
-
-        if add_backward_firing:
-            kwargs.update(
-                {'backward_firing': reduce_backward_firing(firing_graph.backward_firing, partition['indices'])}
-            )
-
-        return YalaBasePattern(firing_graph.I.shape[0], firing_graph.O.shape[1], label_id, output_id, **kwargs)
-
-    @staticmethod
-    def from_input_indices(n_inputs, n_outputs, label_id, output_id, l_inputs, l0, weight, enable_drain=True, **kwargs):
-
-        # Initialize Matrices
-        d_matrices = create_empty_matrices(n_inputs, n_outputs, 1)
-
-        # Set level and matrices
-        ax_levels = np.array([l0])
-        d_matrices['Iw'][l_inputs, 0] = weight
-        d_matrices['Ow'][0, output_id] = 1
-
-        # Update mask if necessary
-        if enable_drain:
-            d_matrices.update({'Im': d_matrices['Iw'] > 0})
-
-        # Add firing graph kwargs
-        kwargs.update({'ax_levels': ax_levels, 'matrices': d_matrices})
-
-        return YalaBasePattern(n_inputs, n_outputs, label_id, output_id, **kwargs)
-
-    def update_outputs(self, output_id, n_outputs=None):
-
-        # Get new n_outputs if specified
-        self.n_outputs = n_outputs if n_outputs is not None else self.n_outputs
-
-        # Change Output matrices
-        sax_O = lil_matrix((1, self.n_outputs))
-        sax_O[0, output_id] = 1
-        self.matrices['Ow'], self.matrices['Om'] = sax_O.copy(), sax_O.copy()
-
-        # Set matrices format and type
-        set_matrices_spec(self.matrices, write_mode=False)
-
-        # Change index output
-        self.output_id = output_id
-
-        return self
-
-    def to_dict(self, **kwargs):
-        d_graph = super(YalaBasePattern, self).to_dict(deep_copy=True)
-        d_struct = {'n_inputs': self.n_inputs, 'n_outputs': self.n_outputs, 'label_id': self.label_id,
-                    'output_id': self.output_id}
-        return d_struct, d_graph
-
-    def copy(self):
-
-        d_graph = super(YalaBasePattern, self).to_dict(deep_copy=True)
-        d_struct = {
-            'n_inputs': self.n_inputs,
-            'n_outputs': self.n_outputs,
-            'label_id': self.label_id,
-            'output_id': self.output_id,
-        }
-
-        return self.from_dict(d_struct, **{k: v for k, v in d_graph.items()})
+from firing_graph.data_structure.utils import create_empty_matrices, set_matrices_spec
+from .data_models import TransientComponents, BaseComponents, ExtractedDrainedComponents
 
 
 class YalaBasePatterns(FiringGraph):
@@ -163,7 +37,7 @@ class YalaBasePatterns(FiringGraph):
         if len(l_partitions) == 0:
             return None
 
-        # Get output indices and intialize matrices
+        # Get output indices and initialize matrices
         t_outs = tuple(d_part['output_id'] for d_part in l_partitions)
         n_outputs = max(t_outs) + 1 if n_outputs is None else n_outputs
         d_matrices = create_empty_matrices(
@@ -178,30 +52,6 @@ class YalaBasePatterns(FiringGraph):
         kwargs = {'partitions': l_partitions, 'matrices': d_matrices, 'ax_levels': ax_levels}
 
         return YalaBasePatterns(d_matrices['Iw'].shape[0], d_matrices['Ow'].shape[1], **kwargs)
-
-    @staticmethod
-    def from_patterns(l_base_patterns, output_method, **kwargs):
-        assert output_method in ["isolate", "label", "same"], f"Unknown output_method {output_method}"
-
-        if len(l_base_patterns) == 0:
-            return None
-
-        # Set Input matrix and levels from patterns
-        sax_I = hstack([p.I for p in l_base_patterns])
-        ax_levels = np.array([p.levels[0] for p in l_base_patterns])
-
-        # Set partitions
-        l_partitions = [dict(
-            indices=[i], depth=2, output_id={'isolate': i, 'label': p.label_id}.get(output_method, p.output_id),
-            precision=p.precision, score=p.score, label_id=p.label_id, **kwargs
-        ) for i, p in enumerate(l_base_patterns)]
-
-        # Set number of output
-        n_outputs = None
-        if output_method in ['same', 'label']:
-            n_outputs = l_base_patterns[0].O.shape[1]
-
-        return YalaBasePatterns.from_input_matrix(sax_I, l_partitions, ax_levels, n_outputs=n_outputs)
 
     @staticmethod
     def from_partitions(l_partitions, firing_graph, output_method, **kwargs):
@@ -225,26 +75,13 @@ class YalaBasePatterns(FiringGraph):
         if output_method in ['same', 'label']:
             n_outputs = firing_graph.O.shape[1]
 
-        return YalaBasePatterns.from_input_matrix(sax_I, l_partitions, ax_levels, n_outputs=n_outputs)
+        return YalaBasePatterns.from_input_matrix(sax_I, l_partitions, ax_levels, n_outputs)
 
-    def remove(self, index,  output_method='isolate', **kwargs):
-        l_partitions = [p for p in self.partitions if p['indices'][0] != index]
-        return self.from_partitions(l_partitions, self, output_method, **kwargs)
-
-    def augment_from_patterns(self, l_base_patterns, output_method, **kwargs):
-
-        if len(l_base_patterns) == 0:
+    def augment_from_pattern(self, pattern, output_method, **kwargs):
+        if pattern is None:
             return self
 
-        # Create necessary variables
-        sax_I = hstack([pattern.I for pattern in l_base_patterns])
-        l_partitions = [
-            {'precision': p.precision, 'score': p.score, 'label_id': p.label_id, 'output_id': p.output_id}
-            for p in l_base_patterns
-        ]
-        ax_levels = np.array([p.levels[0] for p in l_base_patterns])
-
-        return self.augment_from_inputs(sax_I, l_partitions, ax_levels, output_method, **kwargs)
+        return self.augment_from_inputs(pattern.I, pattern.partitions, pattern.levels, output_method, **kwargs)
 
     def augment_from_inputs(self, sax_I, l_partitions, ax_levels, output_method, **kwargs):
         assert output_method in ["isolate", "label", "same"], f"Unknown output_method {output_method}"
@@ -293,57 +130,12 @@ class YalaBasePatterns(FiringGraph):
         return self.from_dict(d_struct, **{k: v for k, v in d_graph.items()})
 
 
-class YalaDrainingPattern(FiringGraph):
-    """
-    This class implement the main data structure used for fiting data. It is composed of weighted link in the form of
-    scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
-    track of the firing of vertices.
-
-    """
-
-    def __init__(self, n_inputs, n_outputs, label_id, output_id, **kwargs):
-
-        self.n_inputs, self.n_outputs, self.label_id, self.output_id = n_inputs, n_outputs, label_id, output_id
-        kwargs.update({'project': 'YalaDrainingPattern'})
-
-        # Invoke parent constructor
-        super(YalaDrainingPattern, self).__init__(**kwargs)
-
-    @staticmethod
-    def from_patterns(base, transient):
-
-        depth, n_core = 2, 2
-        matrices = augment_matrices(base.matrices, transient.matrices)
-        ax_levels = transient.levels
-
-        if not isinstance(base, EmptyPattern):
-            depth, n_core = depth + 1, n_core + 1
-
-            # Set core vertice's connections
-            matrices = add_core_vertices(matrices, 1, n_core - 1)
-            matrices['Cw'][0, -1], matrices['Cw'][1, -1] = 1, 1
-
-            # Update output connection
-            matrices['Ow'] = lil_matrix((n_core, base.n_outputs))
-            matrices['Ow'][-1, base.output_id] = 1
-
-            # Update levels
-            ax_levels = np.hstack((base.levels, ax_levels, np.array([2])))
-
-        # Add firing graph kwargs
-        kwargs = {
-            'precision': base.precision, 'depth': depth, 'matrices': matrices, 'ax_levels': ax_levels,
-            'score': base.score
-        }
-
-        return YalaDrainingPattern(base.n_inputs, base.n_outputs, base.label_id, base.output_id, **kwargs)
-
-
 class YalaDrainingPatterns(FiringGraph):
 
-    def __init__(self, n_inputs, n_outputs, **kwargs):
+    def __init__(self, n_inputs, n_outputs, drainer_params, **kwargs):
 
         self.n_inputs, self.n_outputs = n_inputs, n_outputs
+        self.drainer_params = drainer_params
         kwargs.update({'project': 'YalaDrainingPatterns'})
 
         # Invoke parent constructor
@@ -358,42 +150,122 @@ class YalaDrainingPatterns(FiringGraph):
             "Patterns of different depth inputed in YalaDrainingPatterns"
 
     @staticmethod
-    def from_patterns(l_patterns):
+    def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec, map_fi):
 
-        if len(l_patterns) == 0:
-            return None
+        # Get input weights and count
+        sax_i_mask = (sax_weight > 0).multiply(sax_count > 0)
+        sax_i_count = map_fi.transpose().astype(int).dot(sax_i_mask)
 
-        YalaDrainingPatterns.check_patterns(l_patterns)
+        # Derive feature weight, count and mask
+        sax_f_weight = map_fi.transpose().dot(sax_weight.multiply(sax_i_mask))
+        sax_f_count = map_fi.transpose().dot(sax_count.multiply(sax_i_mask))
+        sax_f_mask = (sax_f_weight > 0).multiply(sax_f_count >= n0)
 
-        l_partitions, l_levels, depth = [], [], l_patterns[0].depth
-        n_core_current, n_in, n_out = 0, l_patterns[0].n_inputs, l_patterns[0].n_outputs
-        d_matrices = create_empty_matrices(n_in, n_out, 0)
+        # compute precision: (original formula: float(score - weight) / (t * (p + r)) + float(p) / (p + r))
+        sax_nom = sax_f_weight.multiply(sax_f_mask) - sax_f_mask.multiply(sax_i_count).dot(diags(ax_w, format='csc'))
+        sax_denom = sax_f_mask.multiply(sax_f_count.dot(diags(ax_p + ax_r, format='csc'))).power(-1)
+        sax_precision = (sax_nom).multiply(sax_denom)
+        sax_precision += (sax_precision > 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
 
-        for pattern in l_patterns:
+        # Get only precision mask that are larger than target precision (ax_prec)
+        precision_mask = sax_precision > (sax_precision > 0).dot(diags(ax_prec, format='csc'))
+        sax_precision, sax_count = sax_precision.multiply(precision_mask), sax_f_count.multiply(precision_mask)
 
-            # Uodate partitions
-            l_partitions.append({
-                'indices': [n_core_current + i for i in range(pattern.Cw.shape[1])],
-                'depth': pattern.depth,
-                'label_id': pattern.label_id,
-                'output_id': pattern.Ow.nonzero()[1][0],
-                'precision': pattern.precision,
-                'score': pattern.score
-            })
+        return sax_precision, sax_count, sax_i_mask.multiply(map_fi.dot(precision_mask))
 
-            n_core_current += pattern.Cw.shape[1]
-            d_matrices = augment_matrices(d_matrices, pattern.matrices, write_mode=None)
+    @staticmethod
+    def from_input_matrix(sax_inputs, drainer_params, base_patterns=None):
 
-            # Merge levels
-            l_levels.extend(list(pattern.levels))
+        n_inputs, n_trans = sax_inputs.shape[0], sax_inputs.shape[1]
+        if base_patterns is None:
+            # Set matrices
+            d_matrices = create_empty_matrices(n_inputs, n_trans, n_trans)
+            d_matrices['Iw'], d_matrices['Im'] = sax_inputs, sax_inputs > 0
+            d_matrices['Ow'] = diags(np.ones(n_trans, dtype=bool), dtype=bool)
+
+            # Set partitions and others
+            l_partitions = [{'indices': [i], 'label_id': i, 'output_id': i, 'precision': 0,} for i in n_trans]
+            ax_levels, depth = np.ones(n_trans), 2
+
+        else:
+            # set inputs
+            d_matrices = create_empty_matrices(n_inputs, n_trans, n_trans * 3)
+            d_matrices['Iw'] = hstack([base_patterns.I, sax_inputs, csc_matrix(n_inputs, n_trans)])
+            d_matrices['Im'] = np.hstack([base_patterns.I, sax_inputs > 0, csc_matrix((n_inputs, n_trans))])
+
+            # Set layer 1 -> layer 2 links
+            sax_c_layer_1 = hstack([csc_matrix((n_trans, 2 * n_trans)), csc_matrix(np.eye(n_trans))])
+            d_matrices['Cw'] = vstack([sax_c_layer_1, sax_c_layer_1, csc_matrix((n_trans, 3 * n_trans))])
+
+            # Set output links
+            l_indices_inputs = [p['output_id'] for p in sorted(base_patterns.partitions, key=lambda x: x['indices'][0])]
+            d_matrices['Ow'] = vstack([csc_matrix(2 * n_trans, n_trans), diags(np.ones(n_trans))[l_indices_inputs, :]])
+
+            # Set additional
+            l_partitions = [
+                dict(indices=[p['indices'], p['indices'] + n_trans, p['indices'] + 2 * n_trans], **p)
+                for p in base_patterns.partitions
+            ]
+            ax_levels, depth = np.hstack([base_patterns.levels, np.ones(n_trans), np.ones(n_trans) * 2]), 2
 
         # Add firing graph kwargs
-        kwargs = {'partitions': l_partitions, 'ax_levels': np.array(l_levels), 'matrices': d_matrices, 'depth': depth}
+        kwargs = {
+            'depth': depth, 'matrices': d_matrices, 'ax_levels': ax_levels, 'score': 0, 'partitions': l_partitions
+        }
 
-        return YalaDrainingPatterns(n_in, n_out, **kwargs)
+        return YalaDrainingPatterns(n_inputs, n_trans, drainer_params, **kwargs)
+
+    def extract_drainer_params(self, idx):
+        ax_p, ax_r = self.drainer_params.feedbacks.penalties[idx], self.drainer_params.feedbacks.rewards[idx]
+        ax_weights = self.drainer_params.feedbacks.penalties[idx]
+
+        return ax_p, ax_r, ax_weights
+
+    def extract_drained_components(self, label_id, min_firing, min_gain, mapping_feature_input):
+        """
+
+        :param l_partitions:
+        :param firing_graph:
+        :param min_firing:
+        :param kwargs:
+        :return:
+        """
+        # Get sub partitions
+        l_parts = [p for p in self.partitions if p['label_id'] == label_id]
+        index_trans = 1 if len(l_parts[0]['indices']) == 3 else 0
+
+        if not len(l_parts):
+            return ExtractedDrainedComponents(base_components=None, transient_components=None)
+
+        # Get precision and drainer params
+        ax_precisions = np.array([p['precision'] for p in l_parts])
+        ax_p, ax_r, ax_weights = self.extract_drainer_params([p['output_id'] for p in l_parts])
+
+        # Extract TransComponents
+        sax_weights = self.Iw[:, [p['indices'][index_trans] for p in l_parts]].astype(float)
+        sax_counts = self.backward_firing['i'][:, [p['indices'][index_trans] for p in l_parts]].astype(float)
+
+        sax_features_prec, sax_features_count, sax_trans_input = self.get_precision(
+            sax_weights, sax_counts, ax_p, ax_r, ax_weights, min_firing, ax_precisions + min_gain, mapping_feature_input
+        )
+        trans_components = TransientComponents(
+            feature_precision=sax_features_prec, feature_count=sax_features_count, inputs=sax_trans_input
+        )
+
+        # Extract BaseComponents
+        if index_trans == 1:
+            base_components = BaseComponents(
+                inputs=self.I[:, [p['indices'][0] for p in l_parts]],
+                levels=self.levels[[p['indices'][0] for p in l_parts]], precisions=ax_precisions
+            )
+
+        else:
+            base_components = None
+
+        return ExtractedDrainedComponents(base_components=base_components, transient_components=trans_components)
 
 
-class YalaOutputSimplePattern(FiringGraph):
+class YalaTopPattern(FiringGraph):
     """
     This class implement the main data structure used for fitting data. It is composed of weighted link in the form of
     scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
@@ -403,10 +275,10 @@ class YalaOutputSimplePattern(FiringGraph):
     def __init__(self, n_inputs, n_outputs, **kwargs):
 
         self.n_inputs, self.n_outputs = n_inputs, n_outputs
-        kwargs.update({'project': 'YalaOutputSimplePattern', 'depth': 2, 'ax_levels': np.ones(n_outputs)})
+        kwargs.update({'project': 'YalaTopPattern', 'depth': 2, 'ax_levels': np.ones(n_outputs)})
 
         # Invoke parent constructor
-        super(YalaOutputSimplePattern, self).__init__(**kwargs)
+        super(YalaTopPattern, self).__init__(**kwargs)
 
     @staticmethod
     def from_mapping(d_mapping):
@@ -418,7 +290,7 @@ class YalaOutputSimplePattern(FiringGraph):
             d_matrices['Iw'][k, v], d_matrices['Ow'] = True, eye(n_outputs, format='csc')
             l_partitions.append({'indices': list(map(int, v)), 'index_input': int(k)})
 
-        return YalaOutputSimplePattern(n_inputs, n_outputs, **{'partitions': l_partitions, 'matrices': d_matrices})
+        return YalaTopPattern(n_inputs, n_outputs, **{'partitions': l_partitions, 'matrices': d_matrices})
 
     def get_io_mapping(self):
         return {p['index_input']: p['indices'] for p in self.partitions}

@@ -126,7 +126,7 @@ class HybridEncoder():
         # Save cat and numerical columns name or indices
         self.cat_cols = cat_cols
         self.num_cols = num_cols
-        self.ax_feature_to_input = None
+        self.sax_feature_to_input = None
 
         # Create encoders
         self.cat_enc = CatEncoder(**params_cat_enc)
@@ -164,20 +164,21 @@ class HybridEncoder():
 
         # Initialize feature to input mapping
         n_inputs = sum([len(l_cat) for l_cat in self.cat_enc.categories_]) + len(self.num_cols) * self.n_bins_num
-        self.ax_feature_to_input = np.zeros((n_inputs, len(self.cat_cols) + len(self.num_cols)), dtype=bool)
+        ax_feature_to_input = np.zeros((n_inputs, len(self.cat_cols) + len(self.num_cols)), dtype=bool)
 
         # fill feature to input mapping
         n = 0
         for i, l_cats in enumerate(self.cat_enc.categories_):
-            self.ax_feature_to_input[range(n, n + len(l_cats)), i] = True
+            ax_feature_to_input[range(n, n + len(l_cats)), i] = True
             n += len(l_cats)
 
         # Fit numerical encoders
         for i, c in enumerate(self.num_cols):
             self.num_encs[c].fit(self.get_array_from_input(X, [c]))
-            self.ax_feature_to_input[range(n, n + self.n_bins_num), i + len(self.cat_cols)] = True
+            ax_feature_to_input[range(n, n + self.n_bins_num), i + len(self.cat_cols)] = True
             n += self.n_bins_num
 
+        self.sax_feature_to_input = csc_matrix(ax_feature_to_input)
         return self
 
     def transform(self, X):

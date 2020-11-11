@@ -54,7 +54,7 @@ params_xgb = {
     'min_child_leaf': 30, 'gamma':  1, "n_estimators": 500
 }
 params_xgb_grid = {
-    #'min_child_leaf': [40, 20], 'gamma': [1, 0.5], "n_estimators": [500, 800]
+    'min_child_leaf': [40, 20], 'gamma': [1, 0.5], "n_estimators": [500, 800]
 }
 
 # Defined custom output name based on parameters of the script

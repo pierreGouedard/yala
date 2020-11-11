@@ -14,8 +14,11 @@ class FoldManager(object):
 
     """
     allowed_methods = ['standard', 'stratified']
-    def __init__(self, df_data, params_builder, nb_folds, df_weights=None, method='standard', test_size=0.2,
-                 use_eval_set=False, eval_function=None, scoring=None, eval_size=0.1, target_name='target'):
+
+    def __init__(
+            self, df_data, params_builder, nb_folds, df_weights=None, method='standard', test_size=0.2,
+            use_eval_set=False, eval_function=None, scoring=None, eval_size=0.1, target_name='target'
+    ):
 
         # Get base parameters
         self.target_name, self.use_eval_set, self.eval_function = target_name, use_eval_set, eval_function
@@ -277,7 +280,7 @@ class FeatureBuilder(object):
                     params_cat_enc=params['params_cat_enc']
                 )
                 self.model.fit(df_data[self.cat_cols + self.num_cols])
-                self.args['mapping_feature_input'] = self.model.ax_feature_to_input
+                self.args['mapping_feature_input'] = csc_matrix(self.model.sax_feature_to_input)
 
             else:
                 raise ValueError('Method not implemented: {}'.format(self.method))

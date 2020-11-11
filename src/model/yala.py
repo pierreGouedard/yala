@@ -3,11 +3,14 @@ from firing_graph.tools.helpers.servers import ArrayServer
 from firing_graph.tools.helpers.sampler import YalaSampler
 from firing_graph.solver.drainer import FiringGraphDrainer
 import numpy as np
-from scipy.sparse import lil_matrix, csc_matrix
+from scipy.sparse import lil_matrix
+from dataclasses import asdict
 
 # Local import
-from .utils import build_firing_graph, disclose_patterns_multi_output, set_feedbacks
+from .utils import build_draining_firing_graph, set_feedbacks
 from .patterns import YalaBasePatterns
+from .picker import YalaGreedyPicker, YalaOrthogonalPicker
+from .data_models import DrainerFeedbacks, DrainerParameters
 
 
 class Yala(object):
@@ -20,46 +23,48 @@ class Yala(object):
     """
 
     def __init__(self,
-                 sampling_rate=0.8,
                  max_iter=5,
                  max_retry=5,
                  min_gain=1e-3,
                  margin=2e-2,
                  draining_size=500,
                  batch_size=1000,
+                 sampling_rate=0.8,
+                 dropout_rate_mask=0.2,
+                 picker_type='orthogonal',
                  min_firing=10,
                  min_precision=0.75,
                  max_precision=None,
                  n_overlap=100,
-                 init_eval_score=0,
-                 dropout_rate_mask=0.2,
+                 k=2,
                  ):
 
-        # Core parameter of the algorithm
+        # Sampler params
         self.sampling_rate = sampling_rate
-        self.max_iter = max_iter
-        self.max_retry = max_retry
-        self.min_gain = min_gain
-        self.margin = margin
-        self.min_precision = min_precision
-        self.eval_score = init_eval_score
+
+        # Core paramerters
+        self.max_iter, self.max_retry = max_iter, max_retry
+        self.min_gain, self.margin, self.min_firing = min_gain, margin, min_firing
+
+        # Server params
         self.dropout_rate_mask = dropout_rate_mask
 
-        if max_precision is None:
-            self.max_precision = 1 - (2 * self.min_gain)
-        else:
-            self.max_precision = max_precision
+        # Picker params
+        self.picker_type = picker_type
+        self.picker_params = dict(
+            min_gain=min_gain, min_precision=min_precision, min_firing=min_firing,
+            max_precision=1 - (2 * self.min_gain) if max_precision is None else max_precision,
+        )
+        self.n_overlap, self.k = n_overlap, k
 
+        # Drainer params
+        self.drainer_params = DrainerParameters(feedbacks=None, weights=None)
         self.draining_size = draining_size
         self.batch_size = batch_size
 
-        # Core attributes
+        # Yala Core attributes
         self.firing_graph = None
-        self.drainer_params = {'t': -1}
-        self.min_firing = min_firing
-        self.n_overlap = n_overlap
-        self.n_outputs, self.n_inputs = None, None
-        self.server, self.sampler, self.drainer = None, None, None
+        self.server, self.sampler, self.drainer, self.picker = None, None, None, None
 
     def __init_parameters(self, y):
         """
@@ -72,28 +77,11 @@ class Yala(object):
 
         # Get scoring process params
         ax_p, ax_r = set_feedbacks(ax_precision + self.min_gain, ax_precision + (2 * self.min_gain))
-        ax_weight = ((ax_p - (ax_precision * (ax_p + ax_r))) * self.min_firing).astype(int) + 1
-        self.drainer_params.update({'p': ax_p, 'r': ax_r})
-
-        return ax_precision + self.min_gain, ax_weight
-
-    def __core_parameters(self, l_patterns):
-        """
-
-        :param l_patterns:
-        :return:
-        """
-        # Set current precision for each structure
-        ax_precision = np.array([p.precision for p in sorted(l_patterns, key=lambda x: x.output_id)])
-        ax_lower_precision = (ax_precision - (2 * self.margin)).clip(min=self.min_gain)
-        ax_upper_precision = (ax_precision - self.margin).clip(min=2 * self.min_gain)
-
-        # Get corresponding reward / penalty and update drainer_params
-        ax_p, ax_r = set_feedbacks(ax_lower_precision, ax_upper_precision)
-        ax_weights = ((ax_p - (ax_lower_precision * (ax_p + ax_r))) * self.min_firing).astype(int) + 1
-        self.drainer_params.update({'p': ax_p, 'r': ax_r})
-
-        return ax_upper_precision.round(3), ax_weights
+        drainer_params = DrainerParameters(
+            feedbacks=DrainerFeedbacks(penalties=ax_p, rewards=ax_r),
+            weights=((ax_p - (ax_precision * (ax_p + ax_r))) * self.min_firing).astype(int) + 1
+        )
+        return drainer_params
 
     def fit(self, X, y, eval_set=None, scoring=None, sample_weight=None, mapping_feature_input=None):
         """
@@ -105,16 +93,26 @@ class Yala(object):
         :param sample_weight:
         :return:
         """
-        self.server = ArrayServer(X, y, dropout_rate_mask=self.dropout_rate_mask).stream_features()
-        self.n_inputs = X.shape[1]
-        # TODO: Create encoder
-        # TODO: forget about defining batch size different for sampler, drainer end selection, there is onl one batch_
-        #  size and only 1 max_draining_iteration
+        # TODO: Server should implement encoder and create a big init function
+
+        # Update size parameters if necessary
         self.batch_size = min(y.shape[0], self.batch_size)
         self.draining_size = min(y.shape[0], self.draining_size)
 
-        # New sampler
-        self.sampler = YalaSampler(mapping_feature_input, self.sampling_rate)
+        # Instantiate core components
+        self.server = ArrayServer(X, y, dropout_rate_mask=self.dropout_rate_mask).stream_features()
+
+        self.sampler = YalaSampler(mapping_feature_input, self.server.n_label, self.sampling_rate)
+        if self.picker_type == 'greedy':
+            self.picker = YalaGreedyPicker(
+                self.server.next_forward(self.batch_size, update_step=False).sax_data_forward, self.n_overlap,
+                **dict(n_label=self.server.n_label, mapping_feature_input=mapping_feature_input, **self.picker_params)
+            )
+        elif self.picker_type == 'orthogonal':
+            self.picker = YalaOrthogonalPicker(
+                self.k,
+                **dict(n_label=self.server.n_label, mapping_feature_input=mapping_feature_input, **self.picker_params)
+            )
 
         # Core loop
         import time
@@ -123,59 +121,39 @@ class Yala(object):
         for i in range(self.max_iter):
             print("[YALA]: Iteration {}".format(i))
 
-            # infer params from signal
-            ax_precision, ax_weights = self.__init_parameters(y)
+            # infer init params from signal and build initial graph
+            self.drainer_params = self.__init_parameters(y)
+            firing_graph = build_draining_firing_graph(self.sampler, self.drainer_params)
 
-            # Initial sampling
-            firing_graph = build_firing_graph(
-                self.sampler.sample(self.server.n_label), ax_weights, n_inputs=self.n_inputs
-            )
-            stop, n, l_selected, n_debug = False, 0, [], 0
-
-            # Core loop
+            stop = False
             while not stop:
                 # Drain firing graph
                 firing_graph = FiringGraphDrainer(
-                    firing_graph, self.server, self.batch_size, **self.drainer_params
+                    firing_graph, self.server, self.batch_size, **asdict(self.drainer_params.feedbacks)
                 )\
                     .drain_all(n_max=self.draining_size)\
                     .firing_graph
 
-                # Disclose new patterns
-                l_transients, l_selected = disclose_patterns_multi_output(
-                    l_selected, self.server, self.batch_size, firing_graph, self.drainer_params, ax_weights,
-                    self.min_firing, self.n_overlap, self.min_precision, self.max_precision, self.min_gain,
-                    csc_matrix(mapping_feature_input)
-                )
+                # Pick partial patterns
+                partials, self.drainer_params = self.picker.pick_patterns_multi_label(self.server, firing_graph)
 
-                print("[YALA]: {} pattern disclosed".format(len(l_transients)))
-                stop = (len(l_transients) == 0)
-
+                # Update stop criteria
+                stop = (len(partials.partitions) == 0)
                 if not stop:
+                    firing_graph = build_draining_firing_graph(self.sampler, self.drainer_params, partials)
 
-                    # update parameters
-                    ax_precision, ax_weights = self.__core_parameters(l_transients)
-
-                    # Sample
-                    firing_graph = build_firing_graph(
-                        self.sampler.sample(len(l_transients), l_transients), ax_weights, l_transients
-                    )
-                    n += 1
-
-                    print("[YALA]: {} pattern updated, targeted precision are {}".format(
-                        len(l_transients), ax_precision)
-                    )
-
+            # Augment current firing graph
             if self.firing_graph is not None:
-                self.firing_graph = self.firing_graph.augment_from_patterns(
-                    l_selected, 'same', **{'group_id': max([p['group_id'] for p in self.firing_graph.partitions]) + 1}
+                self.firing_graph = self.firing_graph.augment_from_pattern(
+                    self.picker.completes, 'same', **{'group_id': i}
                 )
 
             else:
-                self.firing_graph = YalaBasePatterns.from_patterns(l_selected, 'same', **{'group_id': 0})
+                # TODO: what about 'group_id'
+                self.firing_graph = self.picker.completes.copy() if self.picker.completes is not None else None
 
             # Escape main loop on last retry condition
-            if not len(l_selected) > 0:
+            if self.picker.completes is None:
                 count_no_update += 1
                 if count_no_update > self.max_retry:
                     break
@@ -183,14 +161,15 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.update_mask(YalaBasePatterns.from_patterns(l_selected, output_method='same'))
+            self.server.update_mask(self.picker.completes)
+            self.picker.completes = None
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
 
         print('duration of algorithm: {}s'.format(time.time() - start))
         return self
 
-    def predict_proba_new(self, X, n_label, min_probas=0.5):
+    def predict_proba_new(self, X, n_label):
         """
 
         :param X:
@@ -231,7 +210,7 @@ class Yala(object):
 
         ax_count = sax_sum.sum(axis=0).A
         ax_probas = sax_probas.dot(sax_sum).A
-        ax_probas += (ax_count.repeat(sax_probas.shape[0], axis=0) - (sax_probas > 0).dot(sax_sum).A) * 0.5
+        ax_probas += (ax_count.repeat(sax_probas.shape[0], axis=0) - (sax_probas > 0).dot(sax_sum).A) * min_probas
 
         # Merge labels
         ax_probas = ax_probas.dot(np.eye(n_label) * 2 - np.ones((n_label, n_label)))
