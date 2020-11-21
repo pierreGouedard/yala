@@ -54,7 +54,7 @@ class YalaBasePatterns(FiringGraph):
         return YalaBasePatterns(d_matrices['Iw'].shape[0], d_matrices['Ow'].shape[1], **kwargs)
 
     @staticmethod
-    def from_partitions(l_partitions, firing_graph, output_method, **kwargs):
+    def from_partitions(l_partitions, firing_graph, output_method, n_label=None, **kwargs):
         assert output_method in ["isolate", "label", "same"], f"Unknown output_method {output_method}"
 
         if len(l_partitions) == 0:
@@ -67,13 +67,16 @@ class YalaBasePatterns(FiringGraph):
         # Update partitions
         l_partitions = [dict(
             indices=[i], depth=2, output_id={'isolate': i, 'label': p['label_id']}.get(output_method, p['output_id']),
-            precision=p['precision'], score=p['score'], label_id=p['label_id'], **kwargs
+            precision=p['precision'], label_id=p['label_id'], **kwargs
         ) for i, p in enumerate(l_partitions)]
 
         # Set number of output
         n_outputs = None
-        if output_method in ['same', 'label']:
+        if output_method == 'same':
             n_outputs = firing_graph.O.shape[1]
+
+        elif output_method == 'label':
+            n_outputs = n_label
 
         return YalaBasePatterns.from_input_matrix(sax_I, l_partitions, ax_levels, n_outputs)
 
@@ -83,21 +86,21 @@ class YalaBasePatterns(FiringGraph):
 
         return self.augment_from_inputs(pattern.I, pattern.partitions, pattern.levels, output_method, **kwargs)
 
-    def augment_from_inputs(self, sax_I, l_partitions, ax_levels, output_method, **kwargs):
+    def augment_from_inputs(self, sax_I, l_partitions, ax_levels, output_method, n_label=None, **kwargs):
         assert output_method in ["isolate", "label", "same"], f"Unknown output_method {output_method}"
 
         # Compute new input matrix and partitions
         sax_I = hstack([self.I, sax_I])
         l_partitions = self.partitions + [dict(
-            indices=[self.C.shape[0] + i], depth=2, precision=p['precision'], score=p['score'], label_id=p['label_id'],
+            indices=[self.C.shape[0] + i], depth=2, precision=p['precision'], label_id=p['label_id'],
             output_id={'isolate': self.C.shape[0] + i, 'label': p['label_id']}.get(output_method, p['output_id']),
             **kwargs
         ) for i, p in enumerate(l_partitions)]
 
         # Set number of output
-        n_outputs = None
-        if output_method in ['same', 'label']:
-            n_outputs = self.O.shape[1]
+        n_outputs = self.n_outputs
+        if output_method == 'isolate':
+            n_outputs = None
 
         return YalaBasePatterns.from_input_matrix(sax_I, l_partitions, np.hstack((self.levels, ax_levels)), n_outputs)
 
@@ -181,32 +184,34 @@ class YalaDrainingPatterns(FiringGraph):
             # Set matrices
             d_matrices = create_empty_matrices(n_inputs, n_trans, n_trans)
             d_matrices['Iw'], d_matrices['Im'] = sax_inputs, sax_inputs > 0
-            d_matrices['Ow'] = diags(np.ones(n_trans, dtype=bool), dtype=bool)
+            d_matrices['Ow'] = diags(np.ones(n_trans, dtype=bool), dtype=bool, format='csc')
 
             # Set partitions and others
-            l_partitions = [{'indices': [i], 'label_id': i, 'output_id': i, 'precision': 0,} for i in n_trans]
+            l_partitions = [{'indices': [i], 'label_id': i, 'output_id': i, 'precision': 0} for i in range(n_trans)]
             ax_levels, depth = np.ones(n_trans), 2
 
         else:
             # set inputs
             d_matrices = create_empty_matrices(n_inputs, n_trans, n_trans * 3)
-            d_matrices['Iw'] = hstack([base_patterns.I, sax_inputs, csc_matrix(n_inputs, n_trans)])
-            d_matrices['Im'] = np.hstack([base_patterns.I, sax_inputs > 0, csc_matrix((n_inputs, n_trans))])
+            d_matrices['Iw'] = hstack([base_patterns.I, sax_inputs, csc_matrix(sax_inputs.shape)])
+            d_matrices['Im'] = hstack([
+                csc_matrix(sax_inputs.shape, dtype=bool), sax_inputs > 0, csc_matrix(sax_inputs.shape, dtype=bool)
+            ])
 
             # Set layer 1 -> layer 2 links
             sax_c_layer_1 = hstack([csc_matrix((n_trans, 2 * n_trans)), csc_matrix(np.eye(n_trans))])
             d_matrices['Cw'] = vstack([sax_c_layer_1, sax_c_layer_1, csc_matrix((n_trans, 3 * n_trans))])
 
             # Set output links
-            l_indices_inputs = [p['output_id'] for p in sorted(base_patterns.partitions, key=lambda x: x['indices'][0])]
-            d_matrices['Ow'] = vstack([csc_matrix(2 * n_trans, n_trans), diags(np.ones(n_trans))[l_indices_inputs, :]])
+            l_idx_out = [p['output_id'] for p in sorted(base_patterns.partitions, key=lambda x: x['indices'][0])]
+            d_matrices['Ow'] = vstack([csc_matrix((2 * n_trans, n_trans)), csc_matrix(np.eye(n_trans))[l_idx_out, :]])
 
             # Set additional
             l_partitions = [
-                dict(indices=[p['indices'], p['indices'] + n_trans, p['indices'] + 2 * n_trans], **p)
+                dict(indices=[p['indices'][0], p['indices'][0] + n_trans, p.pop('indices')[0] + (2 * n_trans)], **p)
                 for p in base_patterns.partitions
             ]
-            ax_levels, depth = np.hstack([base_patterns.levels, np.ones(n_trans), np.ones(n_trans) * 2]), 2
+            ax_levels, depth = np.hstack([base_patterns.levels, np.ones(n_trans), np.ones(n_trans) * 2]), 3
 
         # Add firing graph kwargs
         kwargs = {
@@ -217,25 +222,19 @@ class YalaDrainingPatterns(FiringGraph):
 
     def extract_drainer_params(self, idx):
         ax_p, ax_r = self.drainer_params.feedbacks.penalties[idx], self.drainer_params.feedbacks.rewards[idx]
-        ax_weights = self.drainer_params.feedbacks.penalties[idx]
+        ax_weights = self.drainer_params.weights[idx]
 
         return ax_p, ax_r, ax_weights
 
-    def extract_drained_components(self, label_id, min_firing, min_gain, mapping_feature_input):
-        """
+    def extract_drained_components(self, label_id, min_firing, min_gain, map_fi):
 
-        :param l_partitions:
-        :param firing_graph:
-        :param min_firing:
-        :param kwargs:
-        :return:
-        """
         # Get sub partitions
         l_parts = [p for p in self.partitions if p['label_id'] == label_id]
-        index_trans = 1 if len(l_parts[0]['indices']) == 3 else 0
 
         if not len(l_parts):
             return ExtractedDrainedComponents(base_components=None, transient_components=None)
+
+        index_trans = 1 if len(l_parts[0]['indices']) == 3 else 0
 
         # Get precision and drainer params
         ax_precisions = np.array([p['precision'] for p in l_parts])
@@ -244,9 +243,8 @@ class YalaDrainingPatterns(FiringGraph):
         # Extract TransComponents
         sax_weights = self.Iw[:, [p['indices'][index_trans] for p in l_parts]].astype(float)
         sax_counts = self.backward_firing['i'][:, [p['indices'][index_trans] for p in l_parts]].astype(float)
-
         sax_features_prec, sax_features_count, sax_trans_input = self.get_precision(
-            sax_weights, sax_counts, ax_p, ax_r, ax_weights, min_firing, ax_precisions + min_gain, mapping_feature_input
+            sax_weights, sax_counts, ax_p, ax_r, ax_weights, min_firing, ax_precisions + min_gain, map_fi
         )
         trans_components = TransientComponents(
             feature_precision=sax_features_prec, feature_count=sax_features_count, inputs=sax_trans_input

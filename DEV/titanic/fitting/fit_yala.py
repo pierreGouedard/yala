@@ -13,7 +13,7 @@ inputs = {
     'train': {'path': features_path, 'name': 'titanic/train.csv'}
 }
 outputs = {
-    'model': {'path': models_path, 'name': 'model=yala.pickle'},
+    'model': {'path': models_path, 'name': 'greedy.pickle'},
 }
 
 parameters = {

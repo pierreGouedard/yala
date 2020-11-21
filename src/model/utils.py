@@ -7,7 +7,7 @@ from .patterns import YalaDrainingPatterns
 
 
 def build_draining_firing_graph(sampler, drainer_params, pattern=None):
-    sax_inputs = sampler.sample(pattern).sax_input_sampled.dot(diags(drainer_params.weights, dtype=float))
+    sax_inputs = sampler.sample(pattern).sax_inputs.dot(diags(drainer_params.weights, dtype=float))
     return YalaDrainingPatterns.from_input_matrix(sax_inputs, drainer_params, base_patterns=pattern)
 
 

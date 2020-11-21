@@ -11,7 +11,7 @@ from settings import models_path, features_path
 
 # Declare input and outputs
 inputs = {
-    'model': {'path': models_path, 'name': 'higgs/model=yala.pickle'},
+    'model': {'path': models_path, 'name': 'higgs/greedy.pickle'},
     'train': {'path': features_path, 'name': 'higgs/train.csv'},
 }
 outputs = {

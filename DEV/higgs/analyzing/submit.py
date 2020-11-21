@@ -24,7 +24,7 @@ outputs = {
 parameters = {
     'model': 'yala',
     'id': 9,
-    'n_label': 2
+    'n_label': 1
 
 }
 
@@ -36,7 +36,8 @@ with open(os.path.join(inputs['model']['path'], inputs['model']['name']).format(
 
 # Load test features
 df_test = pd.read_csv(os.path.join(inputs['test']['path'], inputs['test']['name']), index_col="EventId")
-
+import IPython
+IPython.embed()
 import time
 t0 = time.time()
 df_probas = classifier.predict_proba(df_test, **{'n_label': parameters['n_label']})

@@ -347,7 +347,7 @@ class Classifier(object):
 
         """
         features = self.feature_builder.transform(df)
-        preds = self.model_classification.predict_proba_new(features, **kwargs)
+        preds = self.model_classification.predict_proba(features, **kwargs)
 
         if self.feature_builder.target_transform == 'sparse_encoding':
             df_probas = pd.DataFrame(

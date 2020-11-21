@@ -44,12 +44,12 @@ params_folds = {
         ],
         'cat_cols': ['PRI_jet_num'],
         'target_transform': 'sparse_encoding',
-        'n_label': 2
+        'n_label': 1
     }
 }
 
 params_yala = {
-    'sampling_rate': 0.5, 'max_iter': 500, 'min_gain': 1e-3, 'draining_size': 100000,
+    'sampling_rate': 0.5, 'max_iter': 500, 'min_gain': 1e-3, 'draining_size': 250000,
     'batch_size': 50000, 'min_firing': 100, 'min_precision': 0.2, 'max_retry': 5,
     'dropout_rate_mask': 0.5, 'n_overlap': 50
 }
