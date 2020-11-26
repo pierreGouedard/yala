@@ -8,7 +8,7 @@ sys.path.append(os.getcwd())
 
 # Local import
 from settings import models_path, features_path, submission_path
-from src.dev.names import KVName
+from src.mlops.names import KVName
 from src.tools.ams_metric import AMS_metric
 
 # Declare input and outputs

@@ -187,7 +187,9 @@ class YalaDrainingPatterns(FiringGraph):
             d_matrices['Ow'] = diags(np.ones(n_trans, dtype=bool), dtype=bool, format='csc')
 
             # Set partitions and others
-            l_partitions = [{'indices': [i], 'label_id': i, 'output_id': i, 'precision': 0} for i in range(n_trans)]
+            l_partitions = [
+                {'indices': [i], 'label_id': i, 'output_id': i, 'precision': 0, 'count': 0} for i in range(n_trans)
+            ]
             ax_levels, depth = np.ones(n_trans), 2
 
         else:
@@ -237,7 +239,7 @@ class YalaDrainingPatterns(FiringGraph):
         index_trans = 1 if len(l_parts[0]['indices']) == 3 else 0
 
         # Get precision and drainer params
-        ax_precisions = np.array([p['precision'] for p in l_parts])
+        ax_precisions, ax_counts = np.array([p['precision'] for p in l_parts]), np.array([p['count'] for p in l_parts])
         ax_p, ax_r, ax_weights = self.extract_drainer_params([p['output_id'] for p in l_parts])
 
         # Extract TransComponents
@@ -254,7 +256,7 @@ class YalaDrainingPatterns(FiringGraph):
         if index_trans == 1:
             base_components = BaseComponents(
                 inputs=self.I[:, [p['indices'][0] for p in l_parts]],
-                levels=self.levels[[p['indices'][0] for p in l_parts]], precisions=ax_precisions
+                levels=self.levels[[p['indices'][0] for p in l_parts]], precisions=ax_precisions, counts=ax_counts
             )
 
         else:

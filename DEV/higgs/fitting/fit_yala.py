@@ -7,9 +7,9 @@ sys.path.append(os.getcwd())
 
 # Local import
 from settings import models_path, features_path, export_path
-from src.dev.names import KVName
+from src.mlops.names import KVName
 from src.tools.ams_metric import embedded_ams
-from src.dev.prediction import ClassifierSelector
+from src.mlops.prediction import ClassifierSelector
 from src.tools.ams_metric import AMS_metric
 
 # Declare input and outputs
@@ -50,8 +50,8 @@ params_folds = {
 
 params_yala = {
     'sampling_rate': 0.5, 'max_iter': 500, 'min_gain': 1e-3, 'draining_size': 250000,
-    'batch_size': 50000, 'min_firing': 100, 'min_precision': 0.2, 'max_retry': 5,
-    'dropout_rate_mask': 0.5, 'n_overlap': 50
+    'batch_size': 50000, 'min_firing': 250, 'min_precision': 0.2, 'max_retry': 5,
+    'dropout_rate_mask': 0.5, 'n_overlap': 100
 }
 
 params_yala_grid = {}

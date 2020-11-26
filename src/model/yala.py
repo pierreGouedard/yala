@@ -35,7 +35,6 @@ class Yala(object):
                  min_precision=0.75,
                  max_precision=None,
                  n_overlap=100,
-                 k=1,
                  server_type='unclassified'
                  ):
 
@@ -54,7 +53,7 @@ class Yala(object):
             min_gain=min_gain, min_precision=min_precision, min_firing=min_firing, margin=margin,
             max_precision=1 - (2 * min_gain) if max_precision is None else max_precision,
         )
-        self.n_overlap, self.k = n_overlap, k
+        self.n_overlap = n_overlap
 
         # Drainer params
         self.drainer_params = DrainerParameters(feedbacks=None, weights=None)
@@ -114,7 +113,7 @@ class Yala(object):
             )
         elif self.picker_type == 'orthogonal':
             self.picker = YalaOrthogonalPicker(
-                self.k,
+                y.shape, y.sum(axis=0).A[0],
                 **dict(n_label=self.server.n_label, mapping_feature_input=mapping_feature_input, **self.picker_params)
             )
 
@@ -171,12 +170,20 @@ class Yala(object):
         print('duration of algorithm: {}s'.format(time.time() - start))
         return self
 
-    def predict_proba_new(self, X, n_label, min_probas=0.2):
+    def predict_proba_new(self, X, n_label):
+        assert self.firing_graph is not None, "First fit firing graph"
         l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
 
         # group_id in partition
-        ax_probas = self.firing_graph\
-            .propagate_value(X, np.array([p['precision'] for p in l_partitions])).A
+        sax_probas = self.firing_graph\
+            .reset_output(l_outputs=[p.get('group_id', 0) * 2 + p['label_id'] for p in self.firing_graph.partitions])\
+            .propagate_value(X, np.array([p['precision'] for p in l_partitions]))
+
+        from scipy.sparse import csc_matrix
+
+        sax_coefs = csc_matrix((sax_probas > 0).A.cumsum(axis=1) * (sax_probas > 0).A)
+        sax_coefs.data = np.exp(0 * (sax_coefs.data - 1))
+        ax_probas = sax_probas.multiply(sax_coefs).sum(axis=1).A / (sax_coefs.sum(axis=1).A + 1e-6)
 
         return ax_probas
 

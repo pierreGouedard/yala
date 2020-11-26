@@ -14,8 +14,8 @@ import xgboost
 from scipy.sparse import spmatrix
 
 # Local import
-from src.dev.names import KVName
-from src.dev.features import FoldManager
+from src.mlops.names import KVName
+from src.mlops.features import FoldManager
 from src.model.yala import Yala
 
 logging.getLogger().setLevel(logging.INFO)
@@ -347,7 +347,7 @@ class Classifier(object):
 
         """
         features = self.feature_builder.transform(df)
-        preds = self.model_classification.predict_proba(features, **kwargs)
+        preds = self.model_classification.predict_proba_new(features, **kwargs)
 
         if self.feature_builder.target_transform == 'sparse_encoding':
             df_probas = pd.DataFrame(

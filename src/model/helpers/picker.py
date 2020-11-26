@@ -159,7 +159,8 @@ class YalaGreedyPicker(YalaPicker):
             base_comp = self.concatenate_base_comp([base_comp, self.extract_completes_components(label_id)])
 
         # Extract partials components
-        ax_trans_levels, ax_trans_precision, l_inputs, n_base = np.array([]), np.array([]), [], 0
+        ax_trans_levels, ax_trans_precision,ax_trans_count = np.array([]), np.array([]), np.array([])
+        l_inputs, n_base = [], 0
         for i in range(trans_comp.feature_precision.shape[1]):
 
             k = trans_comp.feature_precision[:, i].nnz
@@ -169,6 +170,7 @@ class YalaGreedyPicker(YalaPicker):
 
             # Extract best features and their input mask
             ax_features = trans_comp.feature_precision[:, i].A.ravel()
+            ax_counts = trans_comp.feature_count[:, i].A.ravel()[ax_features > 0]
             sax_mask = self.map_fi.dot(diags(ax_features > 0, format='csc', dtype=bool)[:, ax_features > 0])
 
             # Extract inputs
@@ -185,12 +187,14 @@ class YalaGreedyPicker(YalaPicker):
             l_inputs.append(sax_inputs.copy())
             ax_trans_levels = np.hstack((ax_trans_levels, ax_levels))
             ax_trans_precision = np.hstack((ax_trans_precision, ax_features[ax_features > 0]))
+            ax_trans_count = np.hstack((ax_trans_count, ax_counts))
 
         # Create component
         partial_comp, n_partial = None, 0
         if len(l_inputs):
             partial_comp = BaseComponents(
-                inputs=hstack(l_inputs), levels=ax_trans_levels, precisions=ax_trans_precision
+                inputs=hstack(l_inputs), levels=ax_trans_levels, precisions=ax_trans_precision,
+                counts=ax_trans_count
             )
             n_partial = len(partial_comp)
 
@@ -201,7 +205,7 @@ class YalaGreedyPicker(YalaPicker):
 
         # Build candidate_patterns
         f_default = lambda x: dict(output_id=x, indices=[x], label_id=label_id, is_trans=x < n_partial)
-        l_partitions = [dict(precision=p, **f_default(n)) for n, p in enumerate(merged_comp.precisions)]
+        l_partitions = [dict(precision=p, count=c, **f_default(n)) for n, (p, c) in enumerate(merged_comp)]
         candidate_patterns = ybp.from_input_matrix(merged_comp.inputs, l_partitions, merged_comp.levels)
 
         return self.refine_picked_patterns(candidate_patterns)
@@ -248,23 +252,13 @@ class YalaOrthogonalPicker(YalaPicker):
 
     """
     """
-    def __init__(self, k, **kwargs):
+    def __init__(self, size, label_size, **kwargs):
         # Set specific attributes
-        self.k = k
         kwargs.update({'selector_type': 'orthogonal'})
+        self.size, self.label_size = size, label_size
 
         # Invoke parent constructor
         super(YalaOrthogonalPicker, self).__init__(**kwargs)
-
-    @staticmethod
-    def generate_coefficients(k):
-        ax_upper = np.hstack((np.eye(k, dtype=bool), np.zeros((k, 1), dtype=bool)))
-        ax_lower = np.hstack((np.zeros((k, 1), dtype=bool), np.triu(np.ones((k, k), dtype=bool), 0)))
-        return csc_matrix(np.vstack((ax_upper, ax_lower)))
-
-    @staticmethod
-    def expected_level(k):
-        return np.hstack([np.arange(k) + 1, [k]])
 
     def filter_completes(self, complete_comp):
         if complete_comp is None:
@@ -277,11 +271,23 @@ class YalaOrthogonalPicker(YalaPicker):
         if len(idx_filtered):
             return BaseComponents(
                 inputs=complete_comp.inputs[:, idx_filtered], levels=complete_comp.levels[idx_filtered],
-                precisions=complete_comp.precisions[idx_filtered]
+                precisions=complete_comp.precisions[idx_filtered], counts=complete_comp.counts[idx_filtered]
             )
 
         else:
             return None
+
+    def get_complement_attribute(self, base_comp, ind_comp, count, precision, label_id):
+
+        if base_comp is not None:
+            base_prec, base_count = base_comp.precisions[ind_comp], base_comp.counts[ind_comp]
+        else:
+            base_prec, base_count = self.label_size[label_id] / self.size, self.size
+
+        c_count = count - base_count
+        c_prec = (base_count * base_prec) - (count * precision) / c_count
+
+        return c_prec, c_count
 
     def extract_comp(self, sax_inputs, ax_count, ax_precs, ax_levels):
 
@@ -296,11 +302,13 @@ class YalaOrthogonalPicker(YalaPicker):
         complete_comp, partial_comp = None, None
         if len(idx_completes):
             complete_comp = BaseComponents(
-                inputs=sax_inputs[:, idx_completes], levels=ax_levels[idx_completes], precisions=ax_precs[idx_completes]
+                inputs=sax_inputs[:, idx_completes], levels=ax_levels[idx_completes],
+                precisions=ax_precs[idx_completes], counts=ax_count[idx_completes]
             )
         if len(idx_partials):
             partial_comp = BaseComponents(
                 inputs=sax_inputs[:, idx_partials], levels=ax_levels[idx_partials], precisions=ax_precs[idx_partials],
+                counts=ax_count[idx_partials]
             )
 
         return complete_comp, partial_comp
@@ -313,52 +321,56 @@ class YalaOrthogonalPicker(YalaPicker):
         # build candidate input matrix
         ax_trans_levels, ax_trans_precs, ax_trans_count = np.array([]), np.array([]), np.array([])
         l_inputs, n_base = [], 0
-        for i in range(trans_comp.feature_precision.shape[1]):
+        for i in range(len(trans_comp)):
 
-            k = min(self.k, trans_comp.feature_precision[:, i].nnz)
-            if k == 0:
+            if trans_comp.feature_precision[:, i].nnz == 0:
                 n_base += 1
                 continue
 
             # Extract best cand precisions and their input mask
-            ax_count = trans_comp.feature_count[:, i].A.ravel()
             ax_features = trans_comp.feature_precision[:, i].A.ravel() + ax_pertubations
-            ax_features = ax_features * (ax_features >= np.sort(ax_features)[-k])
-            sax_mask = self.map_fi.dot(
-                diags(ax_features > 0, format='csc', dtype=bool)[:, ax_features.argsort()[:-k - 1:-1]]
-            )
+            ax_count = trans_comp.feature_count[:, i].A.ravel()
+
+            # Select best candidate
+            max_idx =  ax_features.argmax()
+            ax_precisions, ax_count = ax_features[[max_idx]], ax_count[[max_idx]]
 
             # Extract inputs
             sax_inputs = hstack((
-                sax_mask.multiply(trans_comp.inputs[:, [i] * k]),
-                sax_mask.astype(int) - trans_comp.inputs[:, [i] * k] > 0
-            )).dot(self.generate_coefficients(k))
+                self.map_fi[:, max_idx].multiply(trans_comp.inputs[:, [i]]),
+                self.map_fi[:, max_idx].astype(int) - trans_comp.inputs[:, [i]] > 0
+            ))
 
-            # Get levels and mask of valid input candidate
-            ax_levels = (sax_inputs.T.dot(self.map_fi) > 0).sum(axis=1).A[:, 0]
-            ax_trans_mask = (sax_inputs.T.dot(self.map_fi) > 0).sum(axis=1).A[:, 0] == self.expected_level(k)
+            # Get levels and mask non valid input candidate
+            ax_levels = (sax_inputs.sum(axis=0) > 0).A[0].astype(int)
+            sax_inputs, ax_levels = sax_inputs[:, ax_levels > 0], ax_levels[ax_levels > 0]
 
             # Merge base and trans inputs, update orthogonal complement precision
             if base_comp is not None:
                 # Merge candidate input with base comp inputs and infer complement precision
-                sax_inputs, ax_f_levels = self.merge_inputs(base_comp.inputs[:, [n_base] * (k + 1)], sax_inputs, True)
+                sax_inputs, ax_f_levels = self.merge_inputs(
+                    base_comp.inputs[:, [n_base] * len(ax_levels)], sax_inputs, True
+                )
 
-                # Recompute levels and mask of validate inputs
+                # Recompute levels and mask of non valid inputs
                 ax_levels = (sax_inputs.T.dot(self.map_fi) > 0).sum(axis=1).A[:, 0]
-                ax_trans_mask &= (ax_levels == ax_f_levels)
+                sax_inputs, ax_levels = sax_inputs[:, (ax_levels == ax_f_levels)], ax_levels[(ax_levels == ax_f_levels)]
 
                 # Remove base component
                 base_comp.reduce(np.setdiff1d(np.arange(base_comp.inputs.shape[1]), n_base))
 
-            # Compute levels and precision
-            ax_precisions = np.hstack((ax_features[ax_features.argsort()[-1]], [self.min_precision] * k))
-            ax_count = np.hstack((ax_count[ax_features.argsort()[-1]], [np.inf] * k))
+            # Compute complement count and precision
+            if len(ax_levels) > 1:
+                precision, count = self.get_complement_attribute(
+                    base_comp, n_base, ax_count[0], ax_precisions[0], label_id
+                )
+                ax_precisions, ax_count = np.hstack([ax_precisions, [precision]]), np.hstack([ax_count, [count]])
 
             # Update trans components
-            ax_trans_levels = np.hstack([ax_trans_levels, ax_levels[ax_trans_mask]])
-            ax_trans_precs = np.hstack([ax_trans_precs, ax_precisions[ax_trans_mask]])
-            ax_trans_count = np.hstack([ax_trans_count, ax_count[ax_trans_mask]])
-            l_inputs.append(sax_inputs[:, ax_trans_mask] .copy())
+            ax_trans_levels = np.hstack([ax_trans_levels, ax_levels])
+            ax_trans_precs = np.hstack([ax_trans_precs, ax_precisions])
+            ax_trans_count = np.hstack([ax_trans_count, ax_count])
+            l_inputs.append(sax_inputs.copy())
 
         # Extract components
         complete_comp, partial_comp = None, None
@@ -374,14 +386,14 @@ class YalaOrthogonalPicker(YalaPicker):
         completes = None
         if complete_comp:
             f_default = lambda x: dict(indices=[x], label_id=label_id, output_id=label_id)
-            l_parts = [dict(precision=p, **f_default(n)) for n, p in enumerate(complete_comp.precisions)]
+            l_parts = [dict(precision=p, count=c, **f_default(n)) for n, (p, c) in enumerate(complete_comp)]
             completes = ybp.from_input_matrix(complete_comp.inputs, l_parts, complete_comp.levels, self.n_label)
 
         # Build partials patterns
         partials = None
         if partial_comp:
             f_default = lambda x: dict(indices=[x], label_id=label_id, output_id=x)
-            l_partitions = [dict(precision=p, **f_default(n)) for n, p in enumerate(partial_comp.precisions)]
+            l_partitions = [dict(precision=p, count=c, **f_default(n)) for n, (p, c) in enumerate(partial_comp)]
             partials = ybp.from_input_matrix(partial_comp.inputs, l_partitions, partial_comp.levels)
 
         return partials, completes
