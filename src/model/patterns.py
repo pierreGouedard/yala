@@ -175,6 +175,9 @@ class YalaDrainingPatterns(FiringGraph):
         # Get only precision mask that are larger than target precision (ax_prec)
         precision_mask = sax_precision > (sax_precision > 0).dot(diags(ax_prec, format='csc'))
         sax_precision, sax_count = sax_precision.multiply(precision_mask), sax_f_count.multiply(precision_mask)
+        if (sax_precision.data > 1.01).any():
+            import IPython
+            IPython.embed()
 
         return sax_precision, sax_count, sax_i_mask.multiply(map_fi.dot(precision_mask))
 

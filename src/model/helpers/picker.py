@@ -292,14 +292,18 @@ class YalaOrthogonalPicker(YalaPicker):
 
         # Compute and return complement attributes
         c_count = base_count - count
-        c_prec = ((base_count * base_prec) - (count * precision)) / (c_count + 1e-9)
+
+        if c_count < self.min_firing:
+            return self.min_precision - 1e-3, 0
+
+        c_prec = ((base_count * base_prec) - (count * precision)) / c_count
 
         return c_prec, c_count
 
     def extract_comp(self, sax_inputs, ax_count, ax_precs, ax_levels):
 
         # Check for completion
-        completion_check = lambda x: ax_count[x] < self.min_firing #(ax_count[x] * ax_precs[x]) < self.min_firing
+        completion_check = lambda x: (ax_count[x] * ax_precs[x]) < self.min_firing
 
         # Get indices completes and partials
         idx_completes = [i for i in range(sax_inputs.shape[1]) if completion_check(i)]
@@ -321,7 +325,6 @@ class YalaOrthogonalPicker(YalaPicker):
         return complete_comp, partial_comp
 
     def pick_patterns(self, label_id, base_comp, trans_comp):
-
         # Build input permutation to tackle ties
         ax_pertubations = np.random.randn(trans_comp.feature_precision.shape[0]) * 1e-6
 
