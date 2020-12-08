@@ -8,7 +8,7 @@ from dataclasses import asdict
 from .utils import build_draining_firing_graph, set_feedbacks
 from src.model.helpers.picker import YalaGreedyPicker, YalaOrthogonalPicker
 from src.model.helpers.sampler import YalaSampler
-from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedServer
+from src.model.helpers.server import YalaUnclassifiedServer
 from .data_models import DrainerFeedbacks, DrainerParameters
 
 
@@ -30,7 +30,7 @@ class Yala(object):
                  batch_size=1000,
                  sampling_rate=0.8,
                  dropout_rate_mask=0.2,
-                 picker_type='greedy',
+                 picker_type='orthogonal',
                  min_firing=10,
                  min_precision=0.75,
                  max_precision=None,
@@ -41,7 +41,7 @@ class Yala(object):
         # Sampler params
         self.sampling_rate = sampling_rate
 
-        # Core paramerters
+        # Core parameters
         self.max_iter, self.max_retry = max_iter, max_retry
 
         # Server params
@@ -67,15 +67,12 @@ class Yala(object):
         self.firing_graph = None
         self.server, self.sampler, self.drainer, self.picker = None, None, None, None
 
-    def __init_parameters(self, y):
+    def __init_parameters(self, ax_precision):
         """
 
-        :param y:
+        :param ax_precision:
         :return:
         """
-        # Set core params from signal and current firing graph)
-        ax_precision = np.asarray(y.sum(axis=0) / y.shape[0])[0]
-
         # Get scoring process params
         ax_p, ax_r = set_feedbacks(ax_precision + self.picker.min_gain, ax_precision + (2 * self.picker.min_gain))
         drainer_params = DrainerParameters(
@@ -96,14 +93,13 @@ class Yala(object):
         """
         # Instantiate core components
         if self.server_type == 'unclassified':
-            self.server = YalaUnclassifiedServer(X, y, dropout_rate_mask=self.dropout_rate_mask).stream_features()
+            self.server = YalaUnclassifiedServer(
+                1, 0.5, X, y, **dict(dropout_rate_mask=self.dropout_rate_mask)
+            ).stream_features()
+        else:
+            raise NotImplementedError
 
-        elif self.server_type == 'misclassified':
-            self.server = YalaMisclassifiedServer(
-                self.picker_params['min_precision'],
-                **{"sax_forward": X, "sax_backward": y, "dropout_rate_mask": self.dropout_rate_mask}
-            )
-
+        # Get sampler
         self.sampler = YalaSampler(mapping_feature_input, self.server.n_label, self.sampling_rate)
 
         if self.picker_type == 'greedy':
@@ -113,9 +109,11 @@ class Yala(object):
             )
         elif self.picker_type == 'orthogonal':
             self.picker = YalaOrthogonalPicker(
-                y.shape, y.sum(axis=0).A[0],
                 **dict(n_label=self.server.n_label, mapping_feature_input=mapping_feature_input, **self.picker_params)
             )
+
+        # TODO: In general we should set min_precision and min_firing (rename min_activation) as a function of # of
+        #   activation GIVEN THE MASK !
 
         # Core loop
         import time
@@ -125,9 +123,9 @@ class Yala(object):
             print("[YALA]: Iteration {}".format(i))
 
             # infer init params from signal and build initial graph
-            self.drainer_params = self.__init_parameters(y)
+            print(self.server.get_init_precision())
+            self.drainer_params = self.__init_parameters(self.server.get_init_precision())
             firing_graph = build_draining_firing_graph(self.sampler, self.drainer_params)
-
             stop = False
             while not stop:
                 # Drain firing graph
@@ -144,6 +142,18 @@ class Yala(object):
                 stop = partials is None
                 if not stop:
                     firing_graph = build_draining_firing_graph(self.sampler, self.drainer_params, partials)
+
+            if self.picker.completes is not None:
+                n_firing = self.picker.completes.propagate(X).sum(axis=0)
+
+                print(
+                    '{} vertices selected for a total of {} added activations'.format(
+                        len(self.picker.completes.partitions),
+                        n_firing
+                    )
+                )
+
+                print("the precision of selected vertices is {}".format([p['precision'] for p in self.picker.completes.partitions]))
 
             # Augment current firing graph
             if self.firing_graph is not None:
@@ -165,6 +175,7 @@ class Yala(object):
             # Update sampler attributes
             self.server.update_mask(self.picker.completes)
             self.picker.completes = None
+            self.server.sax_mask_forward = None
             self.server.pattern_backward = None
 
         print('duration of algorithm: {}s'.format(time.time() - start))
@@ -173,21 +184,23 @@ class Yala(object):
     def predict_proba_new(self, X, n_label):
         assert self.firing_graph is not None, "First fit firing graph"
         l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
+        n_label = len(set([p['label_id'] for p in self.firing_graph.partitions]))
 
         # group_id in partition
+        # TODO: for each label if predict proba
         sax_probas = self.firing_graph\
             .reset_output(l_outputs=[p.get('group_id', 0) * 2 + p['label_id'] for p in self.firing_graph.partitions])\
             .propagate_value(X, np.array([p['precision'] for p in l_partitions]))
 
         from scipy.sparse import csc_matrix
-
+        # TODO: Average probas
         sax_coefs = csc_matrix((sax_probas > 0).A.cumsum(axis=1) * (sax_probas > 0).A)
-        sax_coefs.data = np.exp(0 * (sax_coefs.data - 1))
+        sax_coefs.data = np.exp(-0.5 * (sax_coefs.data - 1))
         ax_probas = sax_probas.multiply(sax_coefs).sum(axis=1).A / (sax_coefs.sum(axis=1).A + 1e-6)
 
         return ax_probas
 
-    def predict_proba(self, X, n_label, min_probas=0.5):
+    def predict_proba(self, X, n_label, min_probas=0.2):
         """
 
         :param X:

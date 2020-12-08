@@ -1,6 +1,6 @@
 """All classes that specify data structures."""
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import Optional
 from numpy import array
 from scipy.sparse import spmatrix
 
@@ -30,7 +30,8 @@ class BaseComponents:
             yield self.precisions[i], self.counts[i]
 
     def reduce(self, idx):
-        self.inputs, self.levels, self.precisions = self.inputs[:, idx], self.levels[idx], self.precisions[idx]
+        self.inputs, self.levels = self.inputs[:, idx], self.levels[idx]
+        self.precisions, self.counts = self.precisions[idx], self.counts[idx]
 
 
 @dataclass

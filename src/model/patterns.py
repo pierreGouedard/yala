@@ -67,7 +67,7 @@ class YalaBasePatterns(FiringGraph):
         # Update partitions
         l_partitions = [dict(
             indices=[i], depth=2, output_id={'isolate': i, 'label': p['label_id']}.get(output_method, p['output_id']),
-            precision=p['precision'], label_id=p['label_id'], **kwargs
+            precision=p['precision'], count=p['count'], label_id=p['label_id'], **kwargs
         ) for i, p in enumerate(l_partitions)]
 
         # Set number of output
@@ -92,7 +92,7 @@ class YalaBasePatterns(FiringGraph):
         # Compute new input matrix and partitions
         sax_I = hstack([self.I, sax_I])
         l_partitions = self.partitions + [dict(
-            indices=[self.C.shape[0] + i], depth=2, precision=p['precision'], label_id=p['label_id'],
+            indices=[self.C.shape[0] + i], depth=2, precision=p['precision'], count=p['count'], label_id=p['label_id'],
             output_id={'isolate': self.C.shape[0] + i, 'label': p['label_id']}.get(output_method, p['output_id']),
             **kwargs
         ) for i, p in enumerate(l_partitions)]
@@ -145,14 +145,6 @@ class YalaDrainingPatterns(FiringGraph):
         super(YalaDrainingPatterns, self).__init__(**kwargs)
 
     @staticmethod
-    def check_patterns(l_patterns):
-        assert all([isinstance(o, YalaDrainingPattern) for o in l_patterns]),\
-            "Only YalaDrainingPattern can be used to build YalaDrainingPatters"
-
-        assert len(set([o.depth for o in l_patterns])) == 1, \
-            "Patterns of different depth inputed in YalaDrainingPatterns"
-
-    @staticmethod
     def get_precision(sax_weight, sax_count, ax_p, ax_r, ax_w, n0, ax_prec, map_fi):
 
         # Get input weights and count
@@ -164,11 +156,21 @@ class YalaDrainingPatterns(FiringGraph):
         sax_f_count = map_fi.transpose().dot(sax_count.multiply(sax_i_mask))
         sax_f_mask = (sax_f_weight > 0).multiply(sax_f_count >= n0)
 
+        # TODO: test: computation by input (not by features)
+        sax_nom = sax_weight.multiply(sax_i_mask) - sax_i_mask.dot(diags(ax_w, format='csc'))
+        sax_denom = sax_i_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc')))
+        sax_precision_i = sax_nom.multiply(sax_denom.astype(float).power(-1))
+        sax_precision_i += (sax_precision_i != 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
+
         # compute precision: (original formula: float(score - weight) / (t * (p + r)) + float(p) / (p + r))
         sax_nom = sax_f_weight.multiply(sax_f_mask) - sax_f_mask.multiply(sax_i_count).dot(diags(ax_w, format='csc'))
-        sax_denom = sax_f_mask.multiply(sax_f_count.dot(diags(ax_p + ax_r, format='csc'))).power(-1)
-        sax_precision = (sax_nom).multiply(sax_denom)
-        sax_precision += (sax_precision > 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
+        sax_denom = sax_f_mask.multiply(sax_f_count.dot(diags(ax_p + ax_r, format='csc')))
+        sax_precision = sax_nom.multiply(sax_denom.astype(float).power(-1))
+        sax_precision += (sax_precision != 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
+
+        # print('prec')
+        # import IPython
+        # IPython.embed()
 
         # Get only precision mask that are larger than target precision (ax_prec)
         precision_mask = sax_precision > (sax_precision > 0).dot(diags(ax_prec, format='csc'))
@@ -177,7 +179,7 @@ class YalaDrainingPatterns(FiringGraph):
         return sax_precision, sax_count, sax_i_mask.multiply(map_fi.dot(precision_mask))
 
     @staticmethod
-    def from_input_matrix(sax_inputs, drainer_params, base_patterns=None):
+    def from_input_matrix(sax_inputs, drainer_params, n_label, base_patterns=None):
 
         n_inputs, n_trans = sax_inputs.shape[0], sax_inputs.shape[1]
         if base_patterns is None:
@@ -191,6 +193,9 @@ class YalaDrainingPatterns(FiringGraph):
                 {'indices': [i], 'label_id': i, 'output_id': i, 'precision': 0, 'count': 0} for i in range(n_trans)
             ]
             ax_levels, depth = np.ones(n_trans), 2
+
+            # Set forward mask relation
+            sax_I_mask = csc_matrix(np.eye(n_trans))
 
         else:
             # set inputs
@@ -215,9 +220,16 @@ class YalaDrainingPatterns(FiringGraph):
             ]
             ax_levels, depth = np.hstack([base_patterns.levels, np.ones(n_trans), np.ones(n_trans) * 2]), 3
 
+            # Set forward mask relation
+            sax_I_mask = lil_matrix((n_label, d_matrices['Cw'].shape[1]), dtype=bool)
+            for p in l_partitions:
+                sax_I_mask[p['label_id'], p['indices'][:-1]] = True
+            sax_I_mask = sax_I_mask
+
         # Add firing graph kwargs
         kwargs = {
-            'depth': depth, 'matrices': d_matrices, 'ax_levels': ax_levels, 'score': 0, 'partitions': l_partitions
+            'depth': depth, 'matrices': d_matrices, 'ax_levels': ax_levels, 'score': 0, 'partitions': l_partitions,
+            "I_mask": sax_I_mask
         }
 
         return YalaDrainingPatterns(n_inputs, n_trans, drainer_params, **kwargs)

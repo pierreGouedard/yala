@@ -1,6 +1,5 @@
 # Global imports
-from scipy.sparse import vstack, csc_matrix, diags
-from numpy import uint8, uint16, vectorize, zeros
+from scipy.sparse import csc_matrix, vstack
 from numpy.random import binomial
 from firing_graph.tools.helpers.servers import ArrayServer
 
@@ -8,71 +7,35 @@ from firing_graph.tools.helpers.servers import ArrayServer
 
 
 class YalaUnclassifiedServer(ArrayServer):
+    def __init__(self, n_parallel, p_dropout, sax_forward, sax_backward, **kwargs):
+        self.n_parallel = n_parallel
+        self.p_forward_dropout = p_dropout
 
-    def update_mask(self, pattern_mask, **kwargs):
-        if pattern_mask is None:
-            return
+        # Set sax_mask
+        if n_parallel > 1:
+            l_indices = sum([[i] * n_parallel for i in range(sax_backward.shape[1])], [])
+            sax_backward = sax_backward[:, l_indices]
 
-        sax_mask = super().update_mask(pattern_mask)
+        self.parallel_mask = csc_matrix(sax_backward.shape, dtype=int)
+        if p_dropout > 0:
+            self.parallel_mask = csc_matrix(binomial(1, p_dropout, sax_backward.shape).astype(int))
 
-        if self.sax_mask is not None:
-            self.sax_mask += sax_mask.astype(uint16)
+        super(YalaUnclassifiedServer, self).__init__(
+            **dict(sax_forward=sax_forward, sax_backward=sax_backward, **kwargs)
+        )
+
+    def next_forward(self, n=1, update_step=True):
+        l_positions = self.recursive_positions(self.step_forward, n, self.parallel_mask.shape[0])
+        sax_parallel_mask = vstack([self.parallel_mask[start:end, :].tocsr() for (start, end) in l_positions])
+
+        super().next_forward(n, update_step)
+        # Add to forward mask initial mask
+        if self.sax_mask_forward is not None:
+            self.sax_mask_forward = (self.sax_mask_forward + sax_parallel_mask > 0).astype(self.dtype_forward)
         else:
-            self.sax_mask = sax_mask.astype(uint16)
+            self.sax_mask_forward = sax_parallel_mask
 
-    def apply_mask(self, sax_data, type, l_positions):
-        if type == 'forward' and self.sax_mask is not None:
-            sax_mask = vstack([self.sax_mask[start:end, :].tocsr() for (start, end) in l_positions])
-            if self.dropout_rate_mask > 0:
-                dropout_func = vectorize(lambda x: binomial(int(x), 1 - self.dropout_rate_mask) > 0 if x > 0 else 0)
-                sax_mask.data = dropout_func(sax_mask.data)
-                sax_mask.eliminate_zeros()
+        return self
 
-            sax_data = diags(sax_mask.sum(axis=1).A[:, 0] == 0, dtype=bool).dot(sax_data)
-
-        return sax_data
-
-
-class YalaMisclassifiedServer(ArrayServer):
-
-    def __init__(self, min_probas, **kwargs):
-
-        super(YalaMisclassifiedServer, self).__init__(**kwargs)
-        self.ax_probas = zeros(self.sax_mask.shape)
-        self.min_probas = min_probas
-        self.threshold = 0.9
-        self.ax_counts = zeros(self.sax_mask.shape)
-
-    def update_mask(self, pattern_mask, **kwargs):
-        if pattern_mask is None:
-            return
-
-        # Get predictions
-        ax_precisions = [p['precision'] for p in sorted(pattern_mask.partitions, key=lambda x: x['indices'][0])]
-        ax_values = super().update_mask(pattern_mask, ax_values=ax_precisions).A
-
-        # Merge probas
-        self.ax_probas = self.ax_probas + ax_values
-        self.ax_counts += (ax_values > 0)
-        ax_probas = self.ax_probas / (self.ax_counts + 1e-6)
-
-        sax_mask = super().classification_mask(csc_matrix(ax_probas > self.threshold))
-
-        #sax_mask = super().classification_mask(csc_matrix(ax_probas > ax_probas[:, [1, 0]]))
-
-        if self.sax_mask is not None:
-            self.sax_mask += sax_mask.astype(uint16)
-        else:
-            self.sax_mask = sax_mask.astype(uint8)
-
-    def apply_mask(self, sax_data, type, l_positions):
-        if type == 'forward' and self.sax_mask is not None:
-            sax_mask = vstack([self.sax_mask[start:end, :].tocsr() for (start, end) in l_positions])
-            if self.dropout_rate_mask > 0:
-                dropout_func = vectorize(lambda x: binomial(int(x), 1 - self.dropout_rate_mask) > 0 if x > 0 else 0)
-                sax_mask.data = dropout_func(sax_mask.data)
-                sax_mask.eliminate_zeros()
-
-            sax_data = diags(sax_mask.sum(axis=1).A[:, 0] == 0, dtype=bool).dot(sax_data)
-
-        return sax_data
+    def get_init_precision(self, **kwargs):
+        return super().get_init_precision(self.parallel_mask)

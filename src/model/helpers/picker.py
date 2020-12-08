@@ -39,6 +39,7 @@ class YalaPicker(object):
             inputs=hstack([c.inputs for c in l_comps if c is not None]),
             levels=np.hstack([c.levels for c in l_comps if c is not None]),
             precisions=np.hstack([c.precisions for c in l_comps if c is not None]),
+            counts=np.hstack([c.counts for c in l_comps if c is not None]),
         )
 
     def set_drainer_params(self, partials):
@@ -97,6 +98,7 @@ class YalaPicker(object):
         # Get components
         sax_inputs, ax_levels = self.completes.I[:, l_indices], self.completes.levels[l_indices]
         ax_precisions = np.array([p['precision'] for p in l_partitions_sub])
+        ax_counts = np.array([p['count'] for p in l_partitions_sub])
 
         # Remove extracted partitions from complete patterns
         self.completes = ybp.from_partitions(
@@ -104,7 +106,7 @@ class YalaPicker(object):
             n_label=self.n_label
         )
 
-        return BaseComponents(inputs=sax_inputs, levels=ax_levels, precisions=ax_precisions)
+        return BaseComponents(inputs=sax_inputs, levels=ax_levels, precisions=ax_precisions, counts=ax_counts)
 
     def get_sparse_feature_mask(self, sax_inputs):
         ax_feature_input = self.map_fi.astype(int).T.dot(sax_inputs).A
@@ -160,12 +162,11 @@ class YalaGreedyPicker(YalaPicker):
 
         # Extract partials components
         ax_trans_levels, ax_trans_precision,ax_trans_count = np.array([]), np.array([]), np.array([])
-        l_inputs, n_base = [], 0
+        l_inputs = []
         for i in range(trans_comp.feature_precision.shape[1]):
 
             k = trans_comp.feature_precision[:, i].nnz
             if k == 0:
-                n_base += 1
                 continue
 
             # Extract best features and their input mask
@@ -177,8 +178,10 @@ class YalaGreedyPicker(YalaPicker):
             sax_inputs = sax_mask.multiply(trans_comp.inputs[:, [i] * k])
 
             if base_comp is not None:
-                sax_inputs = self.merge_inputs(base_comp.inputs[:, [n_base] * k], sax_inputs)
-                base_comp.reduce(np.setdiff1d(np.arange(base_comp.inputs.shape[1]), n_base))
+                sax_inputs = self.merge_inputs(base_comp.inputs[:, [i] * k], sax_inputs)
+                # TODO: Here instead of remove create new with removed trans candidates and recompute there prec
+                #   implement also the clustering of grid input instead of taking all by features.
+                # base_comp.reduce(np.setdiff1d(np.arange(base_comp.inputs.shape[1]), n_base))
 
             # Update levels
             ax_levels = (sax_inputs.T.dot(self.map_fi) > 0).sum(axis=1).A[:, 0]
@@ -252,10 +255,9 @@ class YalaOrthogonalPicker(YalaPicker):
 
     """
     """
-    def __init__(self, size, label_size, **kwargs):
+    def __init__(self, **kwargs):
         # Set specific attributes
         kwargs.update({'selector_type': 'orthogonal'})
-        self.size, self.label_size = size, label_size
 
         # Invoke parent constructor
         super(YalaOrthogonalPicker, self).__init__(**kwargs)
@@ -277,22 +279,27 @@ class YalaOrthogonalPicker(YalaPicker):
         else:
             return None
 
-    def get_complement_attribute(self, base_comp, ind_comp, count, precision, label_id):
+    def get_complement_attribute(self, base_comp, ind_comp, count, precision):
 
-        if base_comp is not None:
-            base_prec, base_count = base_comp.precisions[ind_comp], base_comp.counts[ind_comp]
-        else:
-            base_prec, base_count = self.label_size[label_id] / self.size, self.size
+        if base_comp is None:
+            return self.min_precision - 1e-3, np.inf
 
-        c_count = count - base_count
-        c_prec = (base_count * base_prec) - (count * precision) / c_count
+        # Extract parent attributes
+        base_prec, base_count = base_comp.precisions[ind_comp], base_comp.counts[ind_comp]
+
+        if np.isinf(base_count):
+            return self.min_precision - 1e-3, np.inf
+
+        # Compute and return complement attributes
+        c_count = base_count - count
+        c_prec = ((base_count * base_prec) - (count * precision)) / (c_count + 1e-9)
 
         return c_prec, c_count
 
     def extract_comp(self, sax_inputs, ax_count, ax_precs, ax_levels):
 
         # Check for completion
-        completion_check = lambda x: (ax_count[x] * ax_precs[x]) < self.min_firing
+        completion_check = lambda x: ax_count[x] < self.min_firing #(ax_count[x] * ax_precs[x]) < self.min_firing
 
         # Get indices completes and partials
         idx_completes = [i for i in range(sax_inputs.shape[1]) if completion_check(i)]
@@ -332,7 +339,7 @@ class YalaOrthogonalPicker(YalaPicker):
             ax_count = trans_comp.feature_count[:, i].A.ravel()
 
             # Select best candidate
-            max_idx =  ax_features.argmax()
+            max_idx = ax_features.argmax()
             ax_precisions, ax_count = ax_features[[max_idx]], ax_count[[max_idx]]
 
             # Extract inputs
@@ -344,6 +351,9 @@ class YalaOrthogonalPicker(YalaPicker):
             # Get levels and mask non valid input candidate
             ax_levels = (sax_inputs.sum(axis=0) > 0).A[0].astype(int)
             sax_inputs, ax_levels = sax_inputs[:, ax_levels > 0], ax_levels[ax_levels > 0]
+
+            # Compute complement stats
+            precision, count = self.get_complement_attribute(base_comp, n_base, ax_count[0], ax_precisions[0])
 
             # Merge base and trans inputs, update orthogonal complement precision
             if base_comp is not None:
@@ -361,9 +371,6 @@ class YalaOrthogonalPicker(YalaPicker):
 
             # Compute complement count and precision
             if len(ax_levels) > 1:
-                precision, count = self.get_complement_attribute(
-                    base_comp, n_base, ax_count[0], ax_precisions[0], label_id
-                )
                 ax_precisions, ax_count = np.hstack([ax_precisions, [precision]]), np.hstack([ax_count, [count]])
 
             # Update trans components
