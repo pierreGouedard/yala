@@ -8,7 +8,7 @@ from dataclasses import asdict
 from .utils import build_draining_firing_graph, set_feedbacks
 from src.model.helpers.picker import YalaGreedyPicker, YalaOrthogonalPicker
 from src.model.helpers.sampler import YalaSampler
-from src.model.helpers.server import YalaUnclassifiedServer
+from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedServer
 from .data_models import DrainerFeedbacks, DrainerParameters
 
 
@@ -30,12 +30,12 @@ class Yala(object):
                  batch_size=1000,
                  sampling_rate=0.8,
                  dropout_rate_mask=0.2,
-                 picker_type='orthogonal',
+                 picker_type='greedy',
                  min_firing=10,
                  min_precision=0.75,
                  max_precision=None,
                  n_overlap=100,
-                 server_type='unclassified'
+                 server_type='misclassified'
                  ):
 
         # Sampler params
@@ -94,7 +94,11 @@ class Yala(object):
         # Instantiate core components
         if self.server_type == 'unclassified':
             self.server = YalaUnclassifiedServer(
-                1, 0.5, X, y, **dict(dropout_rate_mask=self.dropout_rate_mask)
+                1, 0, X, y, **dict(dropout_rate_mask=self.dropout_rate_mask)
+            ).stream_features()
+        elif  self.server_type == 'misclassified':
+            self.server = YalaMisclassifiedServer(
+                1, 0, X, y, **dict(dropout_rate_mask=self.dropout_rate_mask)
             ).stream_features()
         else:
             raise NotImplementedError
@@ -104,6 +108,7 @@ class Yala(object):
 
         if self.picker_type == 'greedy':
             self.picker = YalaGreedyPicker(
+                #X[y.A[:, 0], :][:self.batch_size, :]
                 self.server.next_forward(self.batch_size, update_step=False).sax_data_forward, self.n_overlap,
                 **dict(n_label=self.server.n_label, mapping_feature_input=mapping_feature_input, **self.picker_params)
             )
@@ -143,17 +148,21 @@ class Yala(object):
                 if not stop:
                     firing_graph = build_draining_firing_graph(self.sampler, self.drainer_params, partials)
 
+            # TODO: TEST => recompute the real precision and reassigned to complete candidate
             if self.picker.completes is not None:
-                n_firing = self.picker.completes.propagate(X).sum(axis=0)
 
-                print(
-                    '{} vertices selected for a total of {} added activations'.format(
-                        len(self.picker.completes.partitions),
-                        n_firing
-                    )
-                )
+                sax_test = self.picker.completes\
+                    .reset_output(l_outputs=[p['indices'][0] for p in self.picker.completes.partitions])\
+                    .propagate(X)
 
-                print("the precision of selected vertices is {}".format([p['precision'] for p in self.picker.completes.partitions]))
+                ax_precs_part = np.array([p['precision'] for p in self.picker.completes.partitions])
+                ax_precs_real = sax_test.astype(int).T.dot(y).A[:, 0] / sax_test.sum(axis=0).A[0]
+                ax_count = sax_test.sum(axis=0).A[0]
+
+                for i, ind in enumerate([p['indices'][0] for p in self.picker.completes.partitions]):
+                    self.picker.completes.partitions[i]['precision'] = ax_precs_real[ind]
+
+                self.picker.completes.reset_output(key='label_id')
 
             # Augment current firing graph
             if self.firing_graph is not None:
@@ -173,7 +182,7 @@ class Yala(object):
                 count_no_update = 0
 
             # Update sampler attributes
-            self.server.update_mask(self.picker.completes)
+            self.server.update_mask_with_pattern(self.picker.completes)
             self.picker.completes = None
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
@@ -187,16 +196,23 @@ class Yala(object):
         n_label = len(set([p['label_id'] for p in self.firing_graph.partitions]))
 
         # group_id in partition
-        # TODO: for each label if predict proba
-        sax_probas = self.firing_graph\
-            .reset_output(l_outputs=[p.get('group_id', 0) * 2 + p['label_id'] for p in self.firing_graph.partitions])\
-            .propagate_value(X, np.array([p['precision'] for p in l_partitions]))
+        # sax_probas = self.firing_graph\
+        #     .reset_output(l_outputs=[p.get('group_id', 0) for p in self.firing_graph.partitions])\
+        #     .propagate_value(X, np.array([p['precision'] for p in l_partitions]))
 
         from scipy.sparse import csc_matrix
-        # TODO: Average probas
-        sax_coefs = csc_matrix((sax_probas > 0).A.cumsum(axis=1) * (sax_probas > 0).A)
-        sax_coefs.data = np.exp(-0.5 * (sax_coefs.data - 1))
-        ax_probas = sax_probas.multiply(sax_coefs).sum(axis=1).A / (sax_coefs.sum(axis=1).A + 1e-6)
+        from src.model.patterns import YalaBasePatterns
+
+        # ax_probas = sax_probas.A.max(axis=1)
+        l_partitions_sub = [p for p in l_partitions if p['precision'] > 0.9]
+        test = YalaBasePatterns.from_partitions(l_partitions_sub, self.firing_graph, 'same')
+        ax_probas = test.propagate_value(X, np.array([p['precision'] for p in l_partitions_sub])).A[:, 0]
+        print((ax_probas > 0).sum())
+
+        #ax_probas = sax_probas.tocsc()[:, 0].A[:, 0]
+        #sax_coefs = csc_matrix((sax_probas > 0).A.cumsum(axis=1) * (sax_probas > 0).A)
+        #sax_coefs.data = np.exp(0 * (sax_coefs.data - 1))
+        #ax_probas = sax_probas.multiply(sax_coefs).sum(axis=1).A / (sax_coefs.sum(axis=1).A + 1e-6)
 
         return ax_probas
 

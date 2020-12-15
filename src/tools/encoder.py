@@ -30,11 +30,7 @@ class NumEncoder(object):
         # Core parameters
         self.method = method
         self.n_bins = n_bins
-
-        # Other parameters
-        self.n_quantile = n_quantile
-        self.n_cluster = n_cluster
-        self.bounds = bounds
+        self.encode_missing = True
 
         # Set unknown attribute to None
         self.bins = None
@@ -75,6 +71,10 @@ class NumEncoder(object):
     def transform(self, ax_continuous):
         ax_activation = abs(self.bins - ax_continuous)
         ax_activation = ax_activation == ax_activation.min(axis=1, keepdims=True)
+
+        if self.encode_missing:
+            ax_activation = np.hstack([ax_activation, ~ax_activation.any(axis=1, keepdims=True)])
+
         return csc_matrix(ax_activation)
 
     def inverse_transform(self, sax_bits, agg='mean'):
@@ -84,13 +84,11 @@ class NumEncoder(object):
 
         if self.bins is None:
             raise ValueError('First set the bins of discretizer')
-
         x_ = min([(v, abs(x - v)) for k, v in self.bins.items()], key=lambda t: t[1])[0]
 
         return x_
 
     def discretize_array(self, ax_continuous):
-
         # Vectorize discretie value function
         vdicretizer = np.vectorize(lambda x: self.discretize_value(x))
 
@@ -127,6 +125,7 @@ class HybridEncoder():
         self.cat_cols = cat_cols
         self.num_cols = num_cols
         self.sax_feature_to_input = None
+        self.encode_missing = True
 
         # Create encoders
         self.cat_enc = CatEncoder(**params_cat_enc)
@@ -163,7 +162,8 @@ class HybridEncoder():
         self.cat_enc.fit(self.get_array_from_input(X, self.cat_cols))
 
         # Initialize feature to input mapping
-        n_inputs = sum([len(l_cat) for l_cat in self.cat_enc.categories_]) + len(self.num_cols) * self.n_bins_num
+        n_inputs = sum([len(l_cat) for l_cat in self.cat_enc.categories_]) + \
+                   len(self.num_cols) * (self.n_bins_num + self.encode_missing)
         ax_feature_to_input = np.zeros((n_inputs, len(self.cat_cols) + len(self.num_cols)), dtype=bool)
 
         # fill feature to input mapping
@@ -175,8 +175,8 @@ class HybridEncoder():
         # Fit numerical encoders
         for i, c in enumerate(self.num_cols):
             self.num_encs[c].fit(self.get_array_from_input(X, [c]))
-            ax_feature_to_input[range(n, n + self.n_bins_num), i + len(self.cat_cols)] = True
-            n += self.n_bins_num
+            ax_feature_to_input[range(n, n + self.n_bins_num + + self.encode_missing), i + len(self.cat_cols)] = True
+            n += self.n_bins_num + self.encode_missing
 
         self.sax_feature_to_input = csc_matrix(ax_feature_to_input)
         return self

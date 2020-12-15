@@ -29,6 +29,12 @@ class BaseComponents:
         for i in range(len(self)):
             yield self.precisions[i], self.counts[i]
 
+    def __getitem__(self, i):
+        assert isinstance(i, int), 'indice should be an integer'
+        return BaseComponents(
+            inputs=self.inputs[:, i], levels=self.levels[[i]], precisions=self.precisions[[i]], counts=self.counts[[i]]
+        )
+
     def reduce(self, idx):
         self.inputs, self.levels = self.inputs[:, idx], self.levels[idx]
         self.precisions, self.counts = self.precisions[idx], self.counts[idx]

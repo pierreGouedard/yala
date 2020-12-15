@@ -31,6 +31,9 @@ class YalaPicker(object):
 
     @staticmethod
     def concatenate_base_comp(l_comps):
+        if not l_comps:
+            return None
+
         if all([c is None for c in l_comps]):
             return None
 
@@ -86,7 +89,7 @@ class YalaPicker(object):
 
         return partials, self.set_drainer_params(partials)
 
-    def extract_completes_components(self, label_id):
+    def extract_completes_comps(self, label_id):
 
         if self.completes is None:
             return None
@@ -116,6 +119,7 @@ class YalaPicker(object):
         return ax_mask
 
     def merge_inputs(self, sax_left, sax_right, return_levels=False):
+
         # Get input mask left and right
         ax_left_mask, ax_right_mask = self.get_sparse_feature_mask(sax_left), self.get_sparse_feature_mask(sax_right)
 
@@ -143,6 +147,7 @@ class YalaGreedyPicker(YalaPicker):
 
         # Set specific attributes
         self.sax_i, self.n_overlap = sax_i, n_overlap
+        self.max_candidate = 100
 
         # Invoke parent constructor
         kwargs.update({'selector_type': 'greedy'})
@@ -151,98 +156,113 @@ class YalaGreedyPicker(YalaPicker):
     @staticmethod
     def update_overlap_mask(sax_selected, sax_candidates, n_overlap):
         ax_candidates_norm = sax_candidates.astype(int).sum(axis=0).A[0]
-        ax_inner_product = csc_matrix(sax_selected.sum(axis=1)).transpose().astype(int).dot(sax_candidates).A[0]
-        return (ax_candidates_norm - ax_inner_product) > n_overlap
+        ax_inner_product = sax_selected.T.astype(int).dot(sax_candidates).A[0]
+        return (ax_candidates_norm - ax_inner_product) > ax_candidates_norm * 0.5 # or .75 n_overlap
 
-    def pick_patterns(self, label_id, base_comp, trans_comp):
+    def get_residual_comp(self, sax_res_inputs, base_comp, ind_comp, ax_counts, ax_precisions):
 
-        # Extract previously completes patterns
-        if base_comp is not None:
-            base_comp = self.concatenate_base_comp([base_comp, self.extract_completes_components(label_id)])
+        # Extract parent attributes
+        base_prec, base_count = base_comp.precisions[ind_comp], base_comp.counts[ind_comp]
 
+        # Compute residual attribute
+        ax_res_counts = base_count - ax_counts
+        ax_res_precisions = ((base_count * base_prec) - (ax_counts * ax_precisions)) / (ax_res_counts + 1e-6)
+        ax_res_levels = (sax_res_inputs.T.dot(self.map_fi) > 0).sum(axis=1).A[:, 0]
+
+        return BaseComponents(
+            inputs=sax_res_inputs[:, ax_res_counts > 0], levels=ax_res_levels[ax_res_counts > 0],
+            precisions=ax_res_precisions[ax_res_counts > 0], counts=ax_res_counts[ax_res_counts > 0]
+        )
+
+    def pick_patterns(self, label_id, parent_comp, trans_comp):
         # Extract partials components
-        ax_trans_levels, ax_trans_precision,ax_trans_count = np.array([]), np.array([]), np.array([])
-        l_inputs = []
+        l_partial_comps, l_residual_comps = [], []
         for i in range(trans_comp.feature_precision.shape[1]):
 
             k = trans_comp.feature_precision[:, i].nnz
             if k == 0:
+                if parent_comp is not None:
+                    l_residual_comps.append(parent_comp[i])
                 continue
 
             # Extract best features and their input mask
             ax_features = trans_comp.feature_precision[:, i].A.ravel()
             ax_counts = trans_comp.feature_count[:, i].A.ravel()[ax_features > 0]
-            sax_mask = self.map_fi.dot(diags(ax_features > 0, format='csc', dtype=bool)[:, ax_features > 0])
+            sax_mask = self.map_fi[:, ax_features > 0]
 
             # Extract inputs
             sax_inputs = sax_mask.multiply(trans_comp.inputs[:, [i] * k])
 
-            if base_comp is not None:
-                sax_inputs = self.merge_inputs(base_comp.inputs[:, [i] * k], sax_inputs)
-                # TODO: Here instead of remove create new with removed trans candidates and recompute there prec
-                #   implement also the clustering of grid input instead of taking all by features.
-                # base_comp.reduce(np.setdiff1d(np.arange(base_comp.inputs.shape[1]), n_base))
-
-            # Update levels
-            ax_levels = (sax_inputs.T.dot(self.map_fi) > 0).sum(axis=1).A[:, 0]
+            if parent_comp is not None:
+                sax_res_inputs = self.merge_inputs(parent_comp.inputs[:, [i] * k], (sax_mask - sax_inputs) > 0)
+                sax_inputs = self.merge_inputs(parent_comp.inputs[:, [i] * k], sax_inputs)
+                l_residual_comps.append(self.get_residual_comp(
+                    sax_res_inputs, parent_comp, i, ax_counts, ax_features[ax_features > 0])
+                )
 
             # Add candidates input and remove corresponding base pattern
-            l_inputs.append(sax_inputs.copy())
-            ax_trans_levels = np.hstack((ax_trans_levels, ax_levels))
-            ax_trans_precision = np.hstack((ax_trans_precision, ax_features[ax_features > 0]))
-            ax_trans_count = np.hstack((ax_trans_count, ax_counts))
+            l_partial_comps.append(BaseComponents(
+                inputs=sax_inputs.copy(), levels=(sax_inputs.T.dot(self.map_fi) > 0).sum(axis=1).A[:, 0],
+                precisions=ax_features[ax_features > 0], counts=ax_counts
+            ))
 
-        # Create component
-        partial_comp, n_partial = None, 0
-        if len(l_inputs):
-            partial_comp = BaseComponents(
-                inputs=hstack(l_inputs), levels=ax_trans_levels, precisions=ax_trans_precision,
-                counts=ax_trans_count
-            )
-            n_partial = len(partial_comp)
+        # TODO: Early filtering of residual given the min_prec
+        # Create base components
+        n_partial = sum([len(comp) for comp in l_partial_comps])
+        comps = self.concatenate_base_comp(
+            l_partial_comps + l_residual_comps + [self.extract_completes_comps(label_id)]
+        )
 
-        # Merge base component
-        merged_comp = self.concatenate_base_comp([partial_comp, base_comp])
-        if merged_comp is None:
+        if comps is None:
             return None, None
 
         # Build candidate_patterns
         f_default = lambda x: dict(output_id=x, indices=[x], label_id=label_id, is_trans=x < n_partial)
-        l_partitions = [dict(precision=p, count=c, **f_default(n)) for n, (p, c) in enumerate(merged_comp)]
-        candidate_patterns = ybp.from_input_matrix(merged_comp.inputs, l_partitions, merged_comp.levels)
+        l_partitions = [dict(precision=p, count=c, **f_default(n)) for n, (p, c) in enumerate(comps)]
+        candidate_patterns = ybp.from_input_matrix(comps.inputs, l_partitions, comps.levels)
 
         return self.refine_picked_patterns(candidate_patterns)
 
     def refine_picked_patterns(self, cand_patterns):
+        # Get sorted patition and initialize activation of selected
+        l_partitions = sorted(cand_patterns.partitions, key=lambda x: x['precision'], reverse=True)
+        sax_selected = csc_matrix((self.sax_i.shape[0], 1), dtype=bool)
 
-        # Propagate activations
-        sax_candidate = cand_patterns.propagate(self.sax_i)
+        l_partials, l_completes = [], []
+        for i in range(int(len(cand_patterns.partitions) / self. max_candidate) + 1):
 
-        # Set variables for selection
-        sax_selected = lil_matrix(sax_candidate.shape)
-        ax_is_distinct = np.ones(sax_candidate.shape[1], dtype=bool)
+            # Sort partitions and extract patterns
+            l_partitions_sub = l_partitions[i * self.max_candidate: (i + 1) * self.max_candidate]
 
-        n, l_partials, l_completes = 0, [], []
-        for d_score in sorted(cand_patterns.partitions, key=lambda x: x['precision'], reverse=True):
-            if not ax_is_distinct[d_score['output_id']]:
+            if not l_partitions_sub:
                 continue
 
-            # if target precision of a base pattern is not reached, drop the pattern
-            if not d_score['is_trans']:
-                if d_score['precision'] < self.min_precision:
-                    continue
+            # Extract sub partition from pattern and propagate signal
+            cand_patterns_sub = cand_patterns.from_partitions(l_partitions_sub, cand_patterns, 'isolate')
+            sax_candidate = cand_patterns_sub.propagate(self.sax_i)
 
-            # Update variables
-            sax_selected[:, n] = sax_candidate[:, d_score['output_id']] > 0
+            # compute distinct
+            # TODO: update mask only on those that need to be updated
             ax_is_distinct = self.update_overlap_mask(sax_selected, sax_candidate, self.n_overlap)
 
-            # update partition lists
-            if d_score['is_trans']:
-                l_partials.append(d_score)
-            else:
-                l_completes.append(d_score)
+            for j, d_score in enumerate(cand_patterns_sub.partitions):
+                if not ax_is_distinct[d_score['output_id']]:
+                    continue
 
-            n += 1
+                # if target precision of a base pattern is not reached, drop the pattern
+                if not d_score['is_trans']:
+                    if d_score['precision'] < self.min_precision:
+                        continue
+
+                # Update variables
+                sax_selected += sax_candidate[:, d_score['output_id']]
+                ax_is_distinct = self.update_overlap_mask(sax_selected, sax_candidate, self.n_overlap)
+
+                # update partition lists
+                if d_score['is_trans']:
+                    l_partials.append(l_partitions_sub[j])
+                else:
+                    l_completes.append(l_partitions_sub[j])
 
         # Gte partial and complete patterns
         partials_patterns = cand_patterns.from_partitions(l_partials, cand_patterns, 'isolate')
@@ -293,7 +313,7 @@ class YalaOrthogonalPicker(YalaPicker):
         # Compute and return complement attributes
         c_count = base_count - count
 
-        if c_count < self.min_firing:
+        if c_count == 0:
             return self.min_precision - 1e-3, 0
 
         c_prec = ((base_count * base_prec) - (count * precision)) / c_count
