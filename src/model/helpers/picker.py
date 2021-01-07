@@ -313,7 +313,7 @@ class YalaOrthogonalPicker(YalaPicker):
         # Compute and return complement attributes
         c_count = base_count - count
 
-        if c_count == 0:
+        if c_count <= 0:
             return self.min_precision - 1e-3, 0
 
         c_prec = ((base_count * base_prec) - (count * precision)) / c_count

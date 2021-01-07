@@ -23,13 +23,18 @@ outputs = {
 
 parameters = {
     'model': 'yala',
-    'id': 2,
+    'id': 0,
     'n_label': 1
 
 }
 
 name_mdl = '{}'.format(KVName.from_dict({'model': parameters['model']}).to_string())
-
+name_mdl = "model=yala"
+"""
+model=yala,picker=ortho,server=misclassified,prec=recomputed.pickle
+model=yala.pickle
+"""
+print(name_mdl)
 # Load model
 with open(os.path.join(inputs['model']['path'], inputs['model']['name']).format(name_mdl), 'rb') as handle:
     classifier = pickle.load(handle)

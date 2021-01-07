@@ -1,7 +1,7 @@
 # Global import
 from firing_graph.solver.drainer import FiringGraphDrainer
 import numpy as np
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, csc_matrix
 from dataclasses import asdict
 
 # Local import
@@ -67,6 +67,9 @@ class Yala(object):
         self.firing_graph = None
         self.server, self.sampler, self.drainer, self.picker = None, None, None, None
 
+        # TODO: test / temp
+        self.d_merger = {}
+
     def __init_parameters(self, ax_precision):
         """
 
@@ -96,7 +99,7 @@ class Yala(object):
             self.server = YalaUnclassifiedServer(
                 1, 0, X, y, **dict(dropout_rate_mask=self.dropout_rate_mask)
             ).stream_features()
-        elif  self.server_type == 'misclassified':
+        elif self.server_type == 'misclassified':
             self.server = YalaMisclassifiedServer(
                 1, 0, X, y, **dict(dropout_rate_mask=self.dropout_rate_mask)
             ).stream_features()
@@ -116,7 +119,6 @@ class Yala(object):
             self.picker = YalaOrthogonalPicker(
                 **dict(n_label=self.server.n_label, mapping_feature_input=mapping_feature_input, **self.picker_params)
             )
-
         # TODO: In general we should set min_precision and min_firing (rename min_activation) as a function of # of
         #   activation GIVEN THE MASK !
 
@@ -149,20 +151,24 @@ class Yala(object):
                     firing_graph = build_draining_firing_graph(self.sampler, self.drainer_params, partials)
 
             # TODO: TEST => recompute the real precision and reassigned to complete candidate
-            if self.picker.completes is not None:
-
-                sax_test = self.picker.completes\
-                    .reset_output(l_outputs=[p['indices'][0] for p in self.picker.completes.partitions])\
-                    .propagate(X)
-
-                ax_precs_part = np.array([p['precision'] for p in self.picker.completes.partitions])
-                ax_precs_real = sax_test.astype(int).T.dot(y).A[:, 0] / sax_test.sum(axis=0).A[0]
-                ax_count = sax_test.sum(axis=0).A[0]
-
-                for i, ind in enumerate([p['indices'][0] for p in self.picker.completes.partitions]):
-                    self.picker.completes.partitions[i]['precision'] = ax_precs_real[ind]
-
-                self.picker.completes.reset_output(key='label_id')
+            # if self.picker.completes is not None:
+            #
+            #     sax_test = self.picker.completes\
+            #         .reset_output(l_outputs=[p['indices'][0] for p in self.picker.completes.partitions])\
+            #         .propagate(X)
+            #     import IPython
+            #     IPython.embed()
+            #     ax_precs_part = np.array([p['precision'] for p in self.picker.completes.partitions])
+            #     ax_precs_real = sax_test.astype(int).T.dot(y).A[:, 0] / sax_test.sum(axis=0).A[0]
+            #     ax_count = sax_test.sum(axis=0).A[0]
+            #     print(ax_precs_part)
+            #     print(ax_precs_real)
+            #     print(ax_count)
+            #
+            #     # for j, ind in enumerate([p['indices'][0] for p in self.picker.completes.partitions]):
+            #     #     self.picker.completes.partitions[j]['precision'] = ax_precs_real[ind]
+            #
+            #     self.picker.completes.reset_output(key='label_id')
 
             # Augment current firing graph
             if self.firing_graph is not None:
@@ -187,6 +193,23 @@ class Yala(object):
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
 
+        from sklearn.linear_model import LogisticRegression
+        import itertools
+        from src.mlops.names import KVName
+
+        d_grid_params = {"penalty": ['l1', 'l2'], "C": [0.01, 0.1, 0.5, 1.0]}
+        d_glob_params = {"fit_intercept": True}
+        for i, cross_values in enumerate(itertools.product(*d_grid_params.values())):
+            d_search_params = d_glob_params.copy()
+            d_search_params.update(dict(zip(d_grid_params.keys(), cross_values)))
+
+            clf = LogisticRegression(**d_search_params)
+            X_ = self.firing_graph\
+                .reset_output(l_outputs=[p.get('group_id', 0) for p in self.firing_graph.partitions])\
+                .propagate(X)
+
+            self.d_merger[KVName.from_dict(d_search_params).to_string()] = clf.fit(X_.A, y.A[:, 0])
+
         print('duration of algorithm: {}s'.format(time.time() - start))
         return self
 
@@ -195,28 +218,30 @@ class Yala(object):
         l_partitions = [p for p in sorted(self.firing_graph.partitions, key=lambda x: x['indices'][0])]
         n_label = len(set([p['label_id'] for p in self.firing_graph.partitions]))
 
+
+        sax_activations = self.firing_graph\
+            .reset_output(l_outputs=[p.get('group_id', 0) for p in self.firing_graph.partitions])\
+            .propagate(X)
+        import IPython
+        IPython.embed()
+        ax_probas = self.d_merger['C=0.1,fit_intercept=True,penalty=l2'].predict_proba(sax_activations.A)
+        return ax_probas[:, [1]]
+
+
+
         # group_id in partition
         # sax_probas = self.firing_graph\
         #     .reset_output(l_outputs=[p.get('group_id', 0) for p in self.firing_graph.partitions])\
-        #     .propagate_value(X, np.array([p['precision'] for p in l_partitions]))
+        #     .propagate_values(X, np.array([p['precision'] for p in l_partitions]))
+        #
+        # #ax_probas = sax_probas.max(axis=1).A[:, 0]
+        # sax_coefs = csc_matrix((sax_probas > 0).A.cumsum(axis=1) * (sax_probas > 0).A)
+        # sax_coefs.data = np.exp(-0 * (sax_coefs.data - 1))
+        # ax_probas = sax_probas.multiply(sax_coefs).sum(axis=1).A / (sax_coefs.sum(axis=1).A + 10 + 1e-6)
+        #
+        # return ax_probas
 
-        from scipy.sparse import csc_matrix
-        from src.model.patterns import YalaBasePatterns
-
-        # ax_probas = sax_probas.A.max(axis=1)
-        l_partitions_sub = [p for p in l_partitions if p['precision'] > 0.9]
-        test = YalaBasePatterns.from_partitions(l_partitions_sub, self.firing_graph, 'same')
-        ax_probas = test.propagate_value(X, np.array([p['precision'] for p in l_partitions_sub])).A[:, 0]
-        print((ax_probas > 0).sum())
-
-        #ax_probas = sax_probas.tocsc()[:, 0].A[:, 0]
-        #sax_coefs = csc_matrix((sax_probas > 0).A.cumsum(axis=1) * (sax_probas > 0).A)
-        #sax_coefs.data = np.exp(0 * (sax_coefs.data - 1))
-        #ax_probas = sax_probas.multiply(sax_coefs).sum(axis=1).A / (sax_coefs.sum(axis=1).A + 1e-6)
-
-        return ax_probas
-
-    def predict_proba(self, X, n_label, min_probas=0.2):
+    def predict_proba(self, X, n_label, min_probas=0.1):
         """
 
         :param X:
@@ -228,10 +253,13 @@ class Yala(object):
         # group_id in partition
         sax_probas = self.firing_graph\
             .reset_output(l_outputs=[p.get('group_id', 0) * 2 + p['label_id'] for p in self.firing_graph.partitions])\
-            .propagate_value(X, np.array([p['precision'] for p in l_partitions]))
+            .propagate_values(X, np.array([p['precision'] for p in l_partitions]))
 
         if n_label == 1:
-            return (sax_probas.sum(axis=1) / ((sax_probas > 0).sum(axis=1) + 1)).A
+            # TODO: True sparse
+            return (sax_probas.sum(axis=1) / sax_probas.shape[1]).A
+            # TODO: regul of 1
+            #return (sax_probas.sum(axis=1) / ((sax_probas > 0).sum(axis=1) + 1)).A
 
         sax_sum = lil_matrix((sax_probas.shape[1], n_label), dtype=bool)
         for label in range(n_label):
