@@ -49,14 +49,14 @@ params_folds = {
 }
 
 params_yala = {
-    'sampling_rate': 1, 'max_iter': 200, 'min_gain': 1e-3, 'draining_size': 250000,
-    'batch_size': 50000, 'min_firing': 250, 'min_precision': 0.85, 'max_retry': 5,
+    'sampling_rate': 1, 'max_iter': 200, 'min_gain': 1e-3, 'draining_size': 200000,
+    'batch_size': 100000, 'min_firing': 250, 'min_precision': 0.85, 'max_retry': 5,
     'dropout_rate_mask': 0, 'n_overlap': 100
 }
 
 params_yala_grid = {}
 params_encoding = {
-    'params_num_enc': {'n_bins': 30, 'method': 'signal'},
+    'params_num_enc': {'n_bins': 30, 'method': 'quantile', "encode_missing": False},
     'params_cat_enc': {'sparse': True, 'dtype': bool, 'handle_unknown': 'ignore'},
     'args': ['mapping_feature_input']
 }

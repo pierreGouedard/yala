@@ -4,7 +4,7 @@ import numpy as np
 import random
 
 # Local import
-from src.tools.encoder import NumEncoder, CatEncoder
+from src.model.helpers.encoder import NumEncoder, CatEncoder
 
 
 class TesEncoder(unittest.TestCase):

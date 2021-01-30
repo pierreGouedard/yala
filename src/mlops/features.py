@@ -5,7 +5,7 @@ from scipy.sparse import csc_matrix
 from sklearn.preprocessing import LabelEncoder
 
 # Local import
-from src.tools.encoder import HybridEncoder, CatEncoder
+from src.model.helpers.encoder import HybridEncoder, CatEncoder
 
 
 class FoldManager(object):
