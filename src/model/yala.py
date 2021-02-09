@@ -201,7 +201,7 @@ class Yala(object):
         print('round 1')
         print("Amplifier info: \n")
         print(f"activation left: {sax_x_left.sum(axis=0)}, activations right {sax_x_right.sum(axis=0)}")
-        print(f'threshold selected: {round(drainer_fgl.levels[0] / amplifier_fg_right.I[:, 0].T.dot(mapping_feature_input).sum(), 2)}')
+        print(f'threshold selected: {round(drainer_fg.levels[0] / amplifier_fg_right.I[:, 0].T.dot(mapping_feature_input).sum(), 2)}')
 
         # Select bits amplified
         (sax_Il, levell), (sax_Ir, levelr) = double_select_amplified_bits(
@@ -427,9 +427,9 @@ class Yala(object):
         # #   analyze it
         # import IPython
         # IPython.embed()
-        # level = sax_Il.astype(bool).T.dot(mapping_feature_input).sum() - 1
-        # final_fg = get_amplifier_firing_graph(sax_Il, level)
-        #
+        level = sax_Il.astype(bool).T.dot(mapping_feature_input).sum() - 1
+        final_fg_1 = get_amplifier_firing_graph(sax_Il, level)
+
         # # Get some stats
         # sax_x_final = final_fg.propagate(X).tocsc()
         # sax_inner_final = sax_x_final.astype(int).T.dot(X)
@@ -496,6 +496,7 @@ class Yala(object):
 
             print("Amplifier info: \n")
             print(f"activation left: {l_activations[0].sum(axis=0)}, activations right ?")
+            print(f'threshold selected: {round(l_levels[0] / l_amplifiers[0].I[:, 0].astype(bool).T.dot(mapping_feature_input).sum(), 2)}')
 
             if l_activations[0].tocsc()[:, 0].sum() < 100:
                 stop = True
@@ -511,11 +512,10 @@ class Yala(object):
                     level = 6
 
             final_level = sax_I.astype(bool).T.dot(mapping_feature_input).sum() - 1
-            final_fg = get_amplifier_firing_graph(sax_I, final_level)
+            final_fg_2 = get_amplifier_firing_graph(sax_I, final_level)
 
             # Print useful information
             print(f"# feature left {sax_I.astype(bool).T.dot(mapping_feature_input).sum()}, level left: {level}")
-            print(f'threshold selected: {round(level / sax_I.astype(bool).T.dot(mapping_feature_input).sum(), 2)}')
 
 
             # This could be computed using amplifier
@@ -548,41 +548,59 @@ class Yala(object):
             l_levels = [level]
             n_it += 1
 
+        ### ANALYSIS
+        sax_x_final_1 = final_fg_1.propagate(X).tocsc()
+        sax_inner_final_1 = sax_x_final_1.astype(int).T.dot(X)
+        prec = sax_x_final_1[:, 0].T.astype(int).dot(y).A / sax_x_final_1[:, 0].sum()
+        print(f"Final fg 1 at level {final_fg_1.levels} is has prec {prec} and activate {sax_x_final_1[:, 0].sum()} times")
 
+
+        sax_x_final_2 = final_fg_2.propagate(X).tocsc()
+        sax_inner_final_2 = sax_x_final_2.astype(int).T.dot(X)
+        prec = sax_x_final_2[:, 0].T.astype(int).dot(y).A / sax_x_final_2[:, 0].sum()
+        print(f"Final fg at level {final_fg_2.levels[0]} is has prec {prec} and activate {sax_x_final_2[:, 0].sum()} times")
 
         import IPython
         IPython.embed()
 
-        sax_x_final = final_fg.propagate(X).tocsc()
-        sax_inner_final = sax_x_final.astype(int).T.dot(X)
-        prec = sax_x_final[:, 0].T.astype(int).dot(y).A / sax_x_final[:, 0].sum()
-        print(f"Final fg at level {final_fg.levels[0]} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
-
-
         for j in range(mapping_feature_input.shape[1]):
 
-            ax_inner_final_sub = sax_inner_final.A[:, mapping_feature_input.A[:, j]]
-            ax_origin_mask_final = ~final_fg.I.A[:, 0][mapping_feature_input.A[:, j]]
-            d_criterion_l, d_origin_signals_l, d_other_signals_l = compute_element_amplifier(
-                ax_inner_final_sub, ax_origin_mask_final, ax_base_activations[mapping_feature_input.A[:, j]]
+            ax_inner_final_1_sub = sax_inner_final_1.A[:, mapping_feature_input.A[:, j]]
+            ax_origin_mask_final_1 = ~final_fg_1.I.A[:, 0][mapping_feature_input.A[:, j]]
+            d_criterion_1, d_origin_signals_1, d_other_signals_1 = compute_element_amplifier(
+                ax_inner_final_1_sub, ax_origin_mask_final_1, ax_base_activations[mapping_feature_input.A[:, j]]
+            )
+
+            ax_inner_final_2_sub = sax_inner_final_2.A[:, mapping_feature_input.A[:, j]]
+            ax_origin_mask_final_2 = ~final_fg_2.I.A[:, 0][mapping_feature_input.A[:, j]]
+            d_criterion_2, d_origin_signals_2, d_other_signals_2 = compute_element_amplifier(
+                ax_inner_final_2_sub, ax_origin_mask_final_2, ax_base_activations[mapping_feature_input.A[:, j]]
             )
 
             fig, l_axes = plt.subplots(1, 3)
-            print(d_criterion_l)
+
             # Plot details of origin bits
-            l_axes[0].plot(d_origin_signals_l['bit_dist'], color="k")
-            l_axes[0].plot(d_origin_signals_l['noise_dist'], '--', color="k")
-            l_axes[0].plot(d_origin_signals_l['select'] * d_origin_signals_l['noise_dist'], 'o', color="k")
+            l_axes[0].plot(d_origin_signals_1['bit_dist'], color="k")
+            l_axes[0].plot(d_origin_signals_1['noise_dist'], '--', color="k")
+            l_axes[0].plot(d_origin_signals_1['select'] * d_origin_signals_1['noise_dist'], 'o', color="k")
+
+            l_axes[0].plot(d_origin_signals_2['bit_dist'], color="b")
+            l_axes[0].plot(d_origin_signals_2['noise_dist'], '--', color="b")
+            l_axes[0].plot(d_origin_signals_2['select'] * d_origin_signals_2['noise_dist'], 'o', color="b")
             l_axes[0].set_title(f'Origin dist {j} - amplifier')
 
             # Plot details of other bits
-            l_axes[1].plot(d_other_signals_l['bit_dist'], color="k")
-            l_axes[1].plot(d_other_signals_l['noise_dist'], '--', color="k")
-            l_axes[1].plot(d_other_signals_l['select'] * d_other_signals_l['noise_dist'], 'o', color="k")
+            l_axes[1].plot(d_other_signals_1['bit_dist'], color="k")
+            l_axes[1].plot(d_other_signals_1['noise_dist'], '--', color="k")
+            l_axes[1].plot(d_other_signals_1['select'] * d_other_signals_1['noise_dist'], 'o', color="k")
+            l_axes[1].plot(d_other_signals_2['bit_dist'], color="b")
+            l_axes[1].plot(d_other_signals_2['noise_dist'], '--', color="b")
+            l_axes[1].plot(d_other_signals_2['select'] * d_other_signals_2['noise_dist'], 'o', color="b")
             l_axes[1].set_title(f'Other dist {j} - amplifier')
 
             # Plot details of all selcted bits
-            l_axes[2].plot(d_other_signals_l['select'] + d_origin_signals_l['select'], color="k")
+            l_axes[2].plot(d_other_signals_1['select'] + d_origin_signals_1['select'], color="k")
+            l_axes[2].plot(d_other_signals_2['select'] + d_origin_signals_2['select'], color="b")
             l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
             plt.show()
 
