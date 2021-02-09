@@ -91,55 +91,64 @@ def single_select_amplified_bits(
     return sax_I, max(round(level), int(n_select / 2))
 
 
+def amplify_debug_display(d_criterion, d_origin_signals, d_other_signals):
+
+    print(f'criterion: {d_criterion}')
+    fig, l_axes = plt.subplots(1, 3)
+
+    # Plot details of origin bits
+    l_axes[0].plot(d_origin_signals['bit_dist'], color="k")
+    l_axes[0].plot(d_origin_signals['noise_dist'], '--', color="k")
+    l_axes[0].plot(d_origin_signals['select'] * d_origin_signals['noise_dist'], 'o', color="k")
+    l_axes[0].set_title(f'Origin dist {j} - amplifier')
+
+    # Plot details of other bits
+    l_axes[1].plot(d_other_signals['bit_dist'], color="k")
+    l_axes[1].plot(d_other_signals['noise_dist'], '--', color="k")
+    l_axes[1].plot(d_other_signals['select'] * d_other_signals['noise_dist'], 'o', color="k")
+    l_axes[1].set_title(f'Other dist {j} - amplifier')
+
+    # Plot details of all selcted bits
+    l_axes[2].plot((d_other_signals['select'] + d_origin_signals['select']), color="k")
+    l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
+    plt.show()
+
+
 def amplify_bits(
-        sax_inner, ax_inputs, ax_base_activations, level, map_fi, new_select_thresh=0.5, debug=False
+        sax_inner, ax_inputs, ax_base_activations, init_level, map_fi, new_select_thresh=0.5, is_init=False, debug=False
 ):
 
     # Set threshold for already selected bits
-    tresh = (float(level)) / ax_inputs.T.dot(map_fi.A).sum()
-    sax_I, level = lil_matrix((len(ax_inputs), 1), dtype=int), 0
+    tresh = (float(init_level)) / ax_inputs.T.dot(map_fi.A).sum()
+    import IPython
+    IPython.embed()
+    sax_I, level, n_selected = lil_matrix((len(ax_inputs), 1), dtype=int), 0, 0
 
     for j in range(map_fi.shape[1]):
         ax_inner_sub, ax_origin_mask = sax_inner.A[:, map_fi.A[:, j]], ~ax_inputs[map_fi.A[:, j]]
 
-        from_parent = (~ax_origin_mask).any()
+        from_parent = (~ax_origin_mask).any() and not is_init
 
         d_criterion, d_origin_signals, d_other_signals = compute_element_amplifier(
             ax_inner_sub, ax_origin_mask, ax_base_activations[map_fi.A[:, j]]
         )
 
         if debug:
-            print(f'criterion: {d_criterion}')
-            fig, l_axes = plt.subplots(1, 3)
-
-            # Plot details of origin bits
-            l_axes[0].plot(d_origin_signals['bit_dist'], color="k")
-            l_axes[0].plot(d_origin_signals['noise_dist'], '--', color="k")
-            l_axes[0].plot(d_origin_signals['select'] * d_origin_signals['noise_dist'], 'o', color="k")
-            l_axes[0].set_title(f'Origin dist {j} - amplifier')
-
-            # Plot details of other bits
-            l_axes[1].plot(d_other_signals['bit_dist'], color="k")
-            l_axes[1].plot(d_other_signals['noise_dist'], '--', color="k")
-            l_axes[1].plot(d_other_signals['select'] * d_other_signals['noise_dist'], 'o', color="k")
-            l_axes[1].set_title(f'Other dist {j} - amplifier')
-
-            # Plot details of all selcted bits
-            l_axes[2].plot((d_other_signals['select'] + d_origin_signals['select']), color="k")
-            l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
-            plt.show()
+            amplify_debug_display(d_criterion, d_origin_signals, d_other_signals)
 
         if (d_criterion['final_criterion'] > tresh) and from_parent:
             sax_I[map_fi.A[:, j], 0] = (d_other_signals['select'] + d_origin_signals['select'])\
                 .astype(int)
             level += d_criterion['final_criterion']
+            n_selected += 1
 
-        # elif (d_criterion_l['final_criterion'] > new_select_thresh) and not from_parent:
-        #     sax_I[map_fi.A[:, j], 0] = (d_other_signals_l['select'] + d_origin_signals_l['select'])\
-        #         .astype(int)
-        #     level += (d_criterion_l['final_criterion'] / 2)
+        elif (d_criterion['final_criterion'] > new_select_thresh) and not from_parent:
+            sax_I[map_fi.A[:, j], 0] = (d_other_signals['select'] + d_origin_signals['select'])\
+                .astype(int)
+            n_selected += 1
+            #level += (d_criterion_l['final_criterion'] / 2)
 
-    return sax_I, int(level)
+    return sax_I, max(int(level), init_level)
 
 
 def double_select_amplified_bits(

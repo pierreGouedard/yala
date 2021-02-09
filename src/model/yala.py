@@ -127,7 +127,8 @@ class Yala(object):
         # TODO: test amplifier
         from src.model.patterns import YalaBasePatterns
         from src.model.util_new_paradigm import get_amplifier_firing_graph, get_drainer_firing_graph, \
-            split_drained_graph, single_select_amplified_bits, double_select_amplified_bits, compute_element_amplifier
+            split_drained_graph, single_select_amplified_bits, double_select_amplified_bits, compute_element_amplifier, \
+            amplify_bits
 
         from matplotlib import pyplot as plt
         import time
@@ -417,62 +418,62 @@ class Yala(object):
         print("Amplifier info: \n")
         print(f"activation left: {sax_x_left.sum(axis=0)}, activations right {sax_x_right.sum(axis=0)}")
         print('too few activation atomic state reached')
-
-        # TODO: activations of both left and right are too small to be amplified. get Back to last amplified vertex and
-        #   analyze it
-        import IPython
-        IPython.embed()
-        level = sax_Il.astype(bool).T.dot(mapping_feature_input).sum() - 1
-        final_fg = get_amplifier_firing_graph(sax_Il, level)
-
-        # Get some stats
-        sax_x_final = final_fg.propagate(X).tocsc()
-        sax_inner_final = sax_x_final.astype(int).T.dot(X)
-        prec = sax_x_final[:, 0].T.astype(int).dot(y).A / sax_x_final[:, 0].sum()
-        print(f"Final fg at level {level} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
-
-        for j in range(mapping_feature_input.shape[1]):
-
-            ax_inner_final_sub = sax_inner_final.A[:, mapping_feature_input.A[:, j]]
-            ax_origin_mask_final = ~final_fg.I.A[:, 0][mapping_feature_input.A[:, j]]
-            d_criterion_l, d_origin_signals_l, d_other_signals_l = compute_element_amplifier(
-                ax_inner_final_sub, ax_origin_mask_final, ax_base_activations[mapping_feature_input.A[:, j]]
-            )
-
-            fig, l_axes = plt.subplots(1, 3)
-            print(d_criterion_l)
-            # Plot details of origin bits
-            l_axes[0].plot(d_origin_signals_l['bit_dist'], color="k")
-            l_axes[0].plot(d_origin_signals_l['noise_dist'], '--', color="k")
-            l_axes[0].plot(d_origin_signals_l['select'] * d_origin_signals_l['noise_dist'], 'o', color="k")
-            l_axes[0].set_title(f'Origin dist {j} - amplifier')
-
-            # Plot details of other bits
-            l_axes[1].plot(d_other_signals_l['bit_dist'], color="k")
-            l_axes[1].plot(d_other_signals_l['noise_dist'], '--', color="k")
-            l_axes[1].plot(d_other_signals_l['select'] * d_other_signals_l['noise_dist'], 'o', color="k")
-            l_axes[1].set_title(f'Other dist {j} - amplifier')
-
-            # Plot details of all selcted bits
-            l_axes[2].plot(d_other_signals_l['select'] + d_origin_signals_l['select'], color="k")
-            l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
-            plt.show()
-
-        # TODO: test random to see if we manage to randomly create such a specific shit
-        import IPython
-        IPython.embed()
-
-        ax_bit_counts = drainer_fgl.I.T.dot(mapping_feature_input.astype(int)).A[0]
-        test_I = csc_matrix(drainer_fgl.I.shape)
-        for j in range(mapping_feature_input.shape[1]):
-            n_bits = mapping_feature_input[:, j].sum()
-            ax_rvalues = np.random.binomial(1, ax_bit_counts[j] / n_bits, n_bits)
-            test_I[mapping_feature_input.A[:, j], 0] = ax_rvalues
-
-        level = test_I.astype(bool).T.dot(mapping_feature_input).sum()
-        test_fg = YalaBasePatterns.from_input_matrix(
-            test_I, [{'indices': 0, 'output_id': 0, 'label': 0, 'precision': 0}], np.array([level])
-        )
+        #
+        # # TODO: activations of both left and right are too small to be amplified. get Back to last amplified vertex and
+        # #   analyze it
+        # import IPython
+        # IPython.embed()
+        # level = sax_Il.astype(bool).T.dot(mapping_feature_input).sum() - 1
+        # final_fg = get_amplifier_firing_graph(sax_Il, level)
+        #
+        # # Get some stats
+        # sax_x_final = final_fg.propagate(X).tocsc()
+        # sax_inner_final = sax_x_final.astype(int).T.dot(X)
+        # prec = sax_x_final[:, 0].T.astype(int).dot(y).A / sax_x_final[:, 0].sum()
+        # print(f"Final fg at level {level} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
+        #
+        # for j in range(mapping_feature_input.shape[1]):
+        #
+        #     ax_inner_final_sub = sax_inner_final.A[:, mapping_feature_input.A[:, j]]
+        #     ax_origin_mask_final = ~final_fg.I.A[:, 0][mapping_feature_input.A[:, j]]
+        #     d_criterion_l, d_origin_signals_l, d_other_signals_l = compute_element_amplifier(
+        #         ax_inner_final_sub, ax_origin_mask_final, ax_base_activations[mapping_feature_input.A[:, j]]
+        #     )
+        #
+        #     fig, l_axes = plt.subplots(1, 3)
+        #     print(d_criterion_l)
+        #     # Plot details of origin bits
+        #     l_axes[0].plot(d_origin_signals_l['bit_dist'], color="k")
+        #     l_axes[0].plot(d_origin_signals_l['noise_dist'], '--', color="k")
+        #     l_axes[0].plot(d_origin_signals_l['select'] * d_origin_signals_l['noise_dist'], 'o', color="k")
+        #     l_axes[0].set_title(f'Origin dist {j} - amplifier')
+        #
+        #     # Plot details of other bits
+        #     l_axes[1].plot(d_other_signals_l['bit_dist'], color="k")
+        #     l_axes[1].plot(d_other_signals_l['noise_dist'], '--', color="k")
+        #     l_axes[1].plot(d_other_signals_l['select'] * d_other_signals_l['noise_dist'], 'o', color="k")
+        #     l_axes[1].set_title(f'Other dist {j} - amplifier')
+        #
+        #     # Plot details of all selcted bits
+        #     l_axes[2].plot(d_other_signals_l['select'] + d_origin_signals_l['select'], color="k")
+        #     l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
+        #     plt.show()
+        #
+        # # TODO: test random to see if we manage to randomly create such a specific shit
+        # import IPython
+        # IPython.embed()
+        #
+        # ax_bit_counts = drainer_fgl.I.T.dot(mapping_feature_input.astype(int)).A[0]
+        # test_I = csc_matrix(drainer_fgl.I.shape)
+        # for j in range(mapping_feature_input.shape[1]):
+        #     n_bits = mapping_feature_input[:, j].sum()
+        #     ax_rvalues = np.random.binomial(1, ax_bit_counts[j] / n_bits, n_bits)
+        #     test_I[mapping_feature_input.A[:, j], 0] = ax_rvalues
+        #
+        # level = test_I.astype(bool).T.dot(mapping_feature_input).sum()
+        # test_fg = YalaBasePatterns.from_input_matrix(
+        #     test_I, [{'indices': 0, 'output_id': 0, 'label': 0, 'precision': 0}], np.array([level])
+        # )
 
         ### We got them !!
 
@@ -490,10 +491,12 @@ class Yala(object):
             l_activations = [amp.propagate(X) for amp in l_amplifiers]
             import IPython
             IPython.embed()
-
-            if l_activations[0].sum() < 100:
+            test = l_activations[0].sum()
+            print(test)
+            if test < 100:
                 import IPython
                 IPython.embed()
+                stop = True
 
             for sax_x in l_activations[:1]:
                 sax_inner = sax_x.astype(int).T.dot(X)
