@@ -49,7 +49,7 @@ def single_select_amplified_bits(
         sax_inner, ax_base_activations, ax_amplified_inputs, map_fi, selection_thresh, debug=False
 ):
 
-    sax_I, level = lil_matrix((len(ax_amplified_inputs), 1), dtype=int), 0
+    sax_I, level, n_select = lil_matrix((len(ax_amplified_inputs), 1), dtype=int), 0, 0
     for j in range(map_fi.shape[1]):
         # Get inner product between amplified signals and grid's bit of the feature
         ax_inner_sub = sax_inner.A[:, map_fi.A[:, j]]
@@ -83,16 +83,73 @@ def single_select_amplified_bits(
         if d_criterion['final_criterion'] > selection_thresh:
             sax_I[map_fi.A[:, j], 0] = (d_other_signals['select'] + d_origin_signals['select']) \
                 .astype(int)
-            level += 1
+            level += d_criterion['final_criterion'] / 2
+            n_select += 1
+
             print(f"feature {j} selected")
 
-    return sax_I, level
+    return sax_I, max(round(level), int(n_select / 2))
+
+
+def amplify_bits(
+        sax_inner, ax_inputs, ax_base_activations, level, map_fi, new_select_thresh=0.5, debug=False
+):
+
+    # Set threshold for already selected bits
+    tresh = (float(level)) / ax_inputs.T.dot(map_fi.A).sum()
+    sax_I, level = lil_matrix((len(ax_inputs), 1), dtype=int), 0
+
+    for j in range(map_fi.shape[1]):
+        ax_inner_sub, ax_origin_mask = sax_inner.A[:, map_fi.A[:, j]], ~ax_inputs[map_fi.A[:, j]]
+
+        from_parent = (~ax_origin_mask).any()
+
+        d_criterion, d_origin_signals, d_other_signals = compute_element_amplifier(
+            ax_inner_sub, ax_origin_mask, ax_base_activations[map_fi.A[:, j]]
+        )
+
+        if debug:
+            print(f'criterion: {d_criterion}')
+            fig, l_axes = plt.subplots(1, 3)
+
+            # Plot details of origin bits
+            l_axes[0].plot(d_origin_signals['bit_dist'], color="k")
+            l_axes[0].plot(d_origin_signals['noise_dist'], '--', color="k")
+            l_axes[0].plot(d_origin_signals['select'] * d_origin_signals['noise_dist'], 'o', color="k")
+            l_axes[0].set_title(f'Origin dist {j} - amplifier')
+
+            # Plot details of other bits
+            l_axes[1].plot(d_other_signals['bit_dist'], color="k")
+            l_axes[1].plot(d_other_signals['noise_dist'], '--', color="k")
+            l_axes[1].plot(d_other_signals['select'] * d_other_signals['noise_dist'], 'o', color="k")
+            l_axes[1].set_title(f'Other dist {j} - amplifier')
+
+            # Plot details of all selcted bits
+            l_axes[2].plot((d_other_signals['select'] + d_origin_signals['select']), color="k")
+            l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
+            plt.show()
+
+        if (d_criterion['final_criterion'] > tresh) and from_parent:
+            sax_I[map_fi.A[:, j], 0] = (d_other_signals['select'] + d_origin_signals['select'])\
+                .astype(int)
+            level += d_criterion['final_criterion']
+
+        # elif (d_criterion_l['final_criterion'] > new_select_thresh) and not from_parent:
+        #     sax_I[map_fi.A[:, j], 0] = (d_other_signals_l['select'] + d_origin_signals_l['select'])\
+        #         .astype(int)
+        #     level += (d_criterion_l['final_criterion'] / 2)
+
+    return sax_I, int(level)
 
 
 def double_select_amplified_bits(
-        sax_inner_left, sax_inner_right, ax_amplified_linputs, ax_amplified_rinputs, ax_base_activations,  map_fi,
-        selection_thresh, debug=False,
+        sax_inner_left, sax_inner_right, ax_amplified_linputs, ax_amplified_rinputs, ax_base_activations, levell,
+        levelr, map_fi, thresh_new_selectionr=0.5, debug=False
 ):
+
+    # Set threshold for already selected bits
+    treshl = (float(levell)) / ax_amplified_rinputs.T.dot(map_fi.A).sum()
+    treshr = (float(levelr)) / ax_amplified_rinputs.T.dot(map_fi.A).sum()
 
     sax_Il = lil_matrix((len(ax_amplified_linputs), 1), dtype=int)
     sax_Ir = lil_matrix((len(ax_amplified_linputs), 1), dtype=int)
@@ -102,13 +159,14 @@ def double_select_amplified_bits(
         ax_inner_right_sub = sax_inner_right.A[:, map_fi.A[:, j]]
         ax_origin_mask_left = ~ax_amplified_linputs[map_fi.A[:, j]]
         ax_origin_mask_right = ~ax_amplified_rinputs[map_fi.A[:, j]]
+        from_parent = (~ax_origin_mask_right + ~ax_origin_mask_left).any()
 
         d_criterion_l, d_origin_signals_l, d_other_signals_l = compute_element_amplifier(
             ax_inner_left_sub, ax_origin_mask_left, ax_base_activations[map_fi.A[:, j]]
         )
 
         d_criterion_r, d_origin_signals_r, d_other_signals_r = compute_element_amplifier(
-            ax_inner_right_sub, ax_origin_mask_right, ax_base_activations[map_fi.A[:, j]]
+            ax_inner_right_sub, ax_origin_mask_right, ax_base_activations[map_fi.A[:, j]],
         )
 
         print(f'criterion left: {d_criterion_l}')
@@ -136,24 +194,35 @@ def double_select_amplified_bits(
             l_axes[1].set_title(f'Other dist {j} - amplifier')
 
             # Plot details of all selcted bits
-            l_axes[2].plot(d_other_signals_l['select'] + d_origin_signals_l['select'], color="k")
-            l_axes[2].plot(d_other_signals_r['select'] + d_origin_signals_r['select'], color="b")
+            l_axes[2].plot((d_other_signals_l['select'] + d_origin_signals_l['select']), color="k")
+            l_axes[2].plot((d_other_signals_r['select'] + d_origin_signals_r['select']), color="b")
             l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
             plt.show()
 
-        if d_criterion_l['final_criterion'] > selection_thresh:
-            sax_Il[map_fi.A[:, j], 0] = (d_other_signals_l['select'] + d_origin_signals_l['select']) \
+        if (d_criterion_l['final_criterion'] > treshl) and from_parent:
+            sax_Il[map_fi.A[:, j], 0] = (d_other_signals_l['select'] + d_origin_signals_l['select'])\
                 .astype(int)
-            levell += 1
+            levell += d_criterion_l['final_criterion']
+            print(f"feature {j} selected for left")
+        elif (d_criterion_l['final_criterion'] > thresh_new_selectionr) and not from_parent:
+            sax_Il[map_fi.A[:, j], 0] = (d_other_signals_l['select'] + d_origin_signals_l['select'])\
+                .astype(int)
+            levelr += (d_criterion_l['final_criterion'] / 2)
+
             print(f"feature {j} selected for left")
 
-        if d_criterion_r['final_criterion'] > selection_thresh:
-            sax_Ir[map_fi.A[:, j], 0] = (d_other_signals_r['select'] + d_origin_signals_r['select']) \
+        if (d_criterion_r['final_criterion'] > treshr) and from_parent:
+            sax_Ir[map_fi.A[:, j], 0] = (d_other_signals_r['select'] + d_origin_signals_r['select'])\
                 .astype(int)
-            levelr += 1
+            levelr += d_criterion_r['final_criterion']
+            print(f"feature {j} selected for right")
+        elif (d_criterion_r['final_criterion'] > thresh_new_selectionr) and not from_parent:
+            sax_Ir[map_fi.A[:, j], 0] = (d_other_signals_r['select'] + d_origin_signals_r['select'])\
+                .astype(int)
+            levelr += (d_criterion_r['final_criterion'] / 2)
             print(f"feature {j} selected for right")
 
-    return (sax_Il, levell), (sax_Ir, levelr)
+    return (sax_Il, int(levell)), (sax_Ir, int(levelr))
 
 
 def get_binomial_upper_ci(ax_p, conf, n):
@@ -182,42 +251,6 @@ def get_drainer_firing_graph(sax_I, level):
 
     return firing_graph
 
-
-def split_drained_graph_new(sax_weight, sax_count, ax_p, ax_r, ax_w, map_fi, target_precision, debug=False, save=False):
-    # Get input weights and count
-    sax_mask_left, sax_mask_right = (sax_count > 0), (sax_count > 0)
-    sax_mask = (sax_weight > 0).multiply(sax_count > 0)
-
-    sax_nom = sax_weight.multiply(sax_mask) - sax_mask.dot(diags(ax_w, format='csc'))
-    sax_denom = sax_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc')))
-    sax_precision = sax_nom.multiply(sax_denom.astype(float).power(-1))
-    sax_precision += (sax_precision != 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
-
-    # fuck you
-    sax_left = (sax_precision > target_precision).multiply(sax_count > 0)
-    sax_right = (sax_precision < target_precision).multiply(sax_count > 0)
-
-    for i in range(map_fi.shape[1]):
-        if ((sax_count > 0).astype(int) - (sax_weight > 0))[map_fi[:, i].A[:, 0]].nnz > 0:
-            sax_mask_left[map_fi[:, i].A[:, 0]] = sax_left[map_fi[:, i].A[:, 0]]
-            sax_mask_right[map_fi[:, i].A[:, 0]] = sax_right[map_fi[:, i].A[:, 0]]
-
-    if debug:
-        # Compute precision
-        plot_path = 'DATA/test_new_paradigm/{}'
-        for i in range(map_fi.shape[1]):
-            ax_precision = sax_precision[map_fi[:, i]].A[0]
-            plt.plot(ax_precision, color='b')
-            plt.plot((ax_precision > 0).astype(int), color='r')
-            plt.title(f'feature {i} - drainer')
-            if save:
-                plt.savefig(plot_path.format(f'{i}_drainer.png'), format='png')
-                plt.clf()
-            else:
-                plt.show()
-
-    sax_residual_mask = ((sax_count > 0) - sax_mask)
-    return sax_mask_left, sax_mask_right
 
 def split_drained_graph(sax_weight, sax_count, ax_p, ax_r, ax_w, map_fi, debug=False, save=False):
     # Get input weights and count
