@@ -490,15 +490,23 @@ class Yala(object):
             l_amplifiers = [get_amplifier_firing_graph(sax_i, l_levels[i]) for i, sax_i in enumerate(l_inputs)]
             l_activations = [amp.propagate(X) for amp in l_amplifiers]
 
+            print(l_amplifiers[0].propagate(X).sum(axis=0))
             if l_activations[0].sum() < 100:
                 stop = True
                 break
+
+            current_final = l_amplifiers[0].copy()
 
             for i, sax_x in enumerate(l_activations[:1]):
                 sax_inner = sax_x.astype(int).T.dot(X)
                 sax_I, level = amplify_bits(
                     sax_inner, l_amplifiers[i].I.A[:, 0], ax_base_activations, l_levels[i], mapping_feature_input, 0.5
                 )
+
+                if n_it == 0:
+                    level = 6
+
+            print(sax_I.nnz, level)
 
             # This could be computed using amplifier
             drainer_fg = get_drainer_firing_graph(sax_I, level)
@@ -524,7 +532,7 @@ class Yala(object):
             l_inputs = [sax_I_left]
             l_levels = [level]
             n_it += 1
-            current_final = l_amplifiers[0]
+
 
 
         import IPython
