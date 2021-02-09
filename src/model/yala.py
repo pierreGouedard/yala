@@ -479,9 +479,9 @@ class Yala(object):
 
 
         # TODO: now what would be a generic loop of the above example
-        stop, l_inputs, l_levels = False, None, None
+        stop, l_inputs, l_levels, n_it = False, None, None, 0
         while not stop:
-
+            print(n_it)
             ########## Amplify
             if l_inputs is None:
                 l_inputs = [sample.T]
@@ -489,19 +489,15 @@ class Yala(object):
 
             l_amplifiers = [get_amplifier_firing_graph(sax_i, l_levels[i]) for i, sax_i in enumerate(l_inputs)]
             l_activations = [amp.propagate(X) for amp in l_amplifiers]
-            import IPython
-            IPython.embed()
-            test = l_activations[0].sum()
-            print(test)
-            if test < 100:
-                import IPython
-                IPython.embed()
-                stop = True
 
-            for sax_x in l_activations[:1]:
+            if l_activations[0].sum() < 100:
+                stop = True
+                break
+
+            for i, sax_x in enumerate(l_activations[:1]):
                 sax_inner = sax_x.astype(int).T.dot(X)
-                sax_I, level = single_select_amplified_bits(
-                    sax_inner, ax_base_activations, amplifier_fg.I.A[:, 0], mapping_feature_input, 0.5
+                sax_I, level = amplify_bits(
+                    sax_inner, l_amplifiers[i].I.A[:, 0], ax_base_activations, l_levels[i], mapping_feature_input, 0.5
                 )
 
             # This could be computed using amplifier
@@ -527,7 +523,19 @@ class Yala(object):
 
             l_inputs = [sax_I_left]
             l_levels = [level]
+            n_it += 1
+            current_final = l_amplifiers[0]
 
+
+        import IPython
+        IPython.embed()
+
+        level = current_final.I[:, 0].astype(bool).T.dot(mapping_feature_input).sum() - 1
+        final_fg = get_amplifier_firing_graph(current_final.I[:, 0], level)
+        sax_x_final = final_fg.propagate(X).tocsc()
+        sax_inner_final = sax_x_final.astype(int).T.dot(X)
+        prec = sax_x_final[:, 0].T.astype(int).dot(y).A / sax_x_final[:, 0].sum()
+        print(f"Final fg at level {level} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
         # END
 
         # Core loop
