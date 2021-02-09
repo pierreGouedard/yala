@@ -149,6 +149,7 @@ class Yala(object):
         print('round 0')
         print("Amplifier info: \n")
         print(f"activations: {sax_activations.sum(axis=0)}")
+        print(f'threshold selected: {0.5}')
 
         # select bits amplified
         sax_I, level = single_select_amplified_bits(
@@ -156,7 +157,6 @@ class Yala(object):
         )
         print("amplificaiton done: \n")
         print(f"# feature {sax_I.astype(bool).T.dot(mapping_feature_input).sum()}, level: {level}")
-        print(f'threshold selected: {round(level / sax_I.astype(bool).T.dot(mapping_feature_input).sum(), 2)}')
 
         print(f'============== Time amplifier is {round(time.time() - t, 2)} seconds')
 
@@ -173,6 +173,7 @@ class Yala(object):
         print('round 0')
         print("Drainer info: \n")
         print(f'activation: {sax_activations.sum()}, precision: {target_prec}')
+        print(f'drainer params: {drainer_params}')
 
         # split it using drained
         drained = FiringGraphDrainer(
@@ -185,6 +186,8 @@ class Yala(object):
             drained.Iw, drained.backward_firing['i'], drainer_params.feedbacks.penalties,
             drainer_params.feedbacks.rewards, drainer_params.weights, mapping_feature_input
         )
+        print(f"# feature left {sax_I_left.astype(bool).T.dot(mapping_feature_input).sum()}, level: {drained.levels}")
+
         print(f'============== Time drain / split is {round(time.time() - t, 2)} seconds')
 
         ######################### STEP 1: AMPLIFY'
@@ -198,6 +201,7 @@ class Yala(object):
         print('round 1')
         print("Amplifier info: \n")
         print(f"activation left: {sax_x_left.sum(axis=0)}, activations right {sax_x_right.sum(axis=0)}")
+        print(f'threshold selected: {round(drainer_fgl.levels[0] / amplifier_fg_right.I[:, 0].T.dot(mapping_feature_input).sum(), 2)}')
 
         # Select bits amplified
         (sax_Il, levell), (sax_Ir, levelr) = double_select_amplified_bits(
@@ -207,7 +211,6 @@ class Yala(object):
 
         # Print rest of useful information
         print(f"# feature left {sax_Il.astype(bool).T.dot(mapping_feature_input).sum()}, level left: {levell}")
-        print(f'threshold selected: {round(levell / sax_Il.astype(bool).T.dot(mapping_feature_input).sum(), 2)}')
         print(f"sim left right {sax_Il.T.dot(sax_Ir)[0,0] / min(sax_Ir.sum(), sax_Il.sum())}")
 
         ########################### STEP 2: DRAIN'
@@ -253,6 +256,7 @@ class Yala(object):
         print('round 2')
         print("Amplifier info: \n")
         print(f"activation left: {sax_x_left.sum(axis=0)}, activations right {sax_x_right.sum(axis=0)}")
+        print(f'threshold selected: {round(drainer_fgl.levels[0] / amplifier_fg_right.I[:, 0].T.dot(mapping_feature_input).sum(), 2)}')
 
         # Select bits amplified
         (sax_Il, levell), (sax_Ir, levelr) = double_select_amplified_bits(
@@ -262,7 +266,6 @@ class Yala(object):
 
         # Print useful information
         print(f"# feature left {sax_Il.astype(bool).T.dot(mapping_feature_input).sum()}, level left: {levell}")
-        print(f'threshold selected: {round(levell / sax_Il.astype(bool).T.dot(mapping_feature_input).sum(), 2)}')
         print(f"sim left right {sax_Il.T.dot(sax_Ir)[0,0] / min(sax_Ir.sum(), sax_Il.sum())}")
 
         ########################### STEP 2: DRAIN''
@@ -308,6 +311,7 @@ class Yala(object):
         print('round 3')
         print("Amplifier info: \n")
         print(f"activation left: {sax_x_left.sum(axis=0)}, activations right {sax_x_right.sum(axis=0)}")
+        print(f'threshold selected: {round(drainer_fgl.levels[0] / amplifier_fg_right.I[:, 0].T.dot(mapping_feature_input).sum(), 2)}')
 
         # Select bits amplified
         (sax_Il, levell), (sax_Ir, levelr) = double_select_amplified_bits(
@@ -363,6 +367,7 @@ class Yala(object):
         print('round 4')
         print("Amplifier info: \n")
         print(f"activation left: {sax_x_left.sum(axis=0)}, activations right {sax_x_right.sum(axis=0)}")
+        print(f'threshold selected: {round(drainer_fgl.levels[0] / amplifier_fg_right.I[:, 0].T.dot(mapping_feature_input).sum(), 2)}')
 
         # Select bits amplified
         (sax_Il, levell), (sax_Ir, levelr) = double_select_amplified_bits(
@@ -372,7 +377,6 @@ class Yala(object):
 
         # Print useful information
         print(f"# feature left {sax_Il.astype(bool).T.dot(mapping_feature_input).sum()}, level left: {levell}")
-        print(f'threshold selected: {round(levell / sax_Il.astype(bool).T.dot(mapping_feature_input).sum(), 2)}')
         print(f"sim left right {sax_Il.T.dot(sax_Ir)[0,0] / min(sax_Ir.sum(), sax_Il.sum())}")
 
         ########################### STEP 2: DRAIN''''
@@ -477,7 +481,7 @@ class Yala(object):
 
         ### We got them !!
 
-
+        self.server.stream_features()
         # TODO: now what would be a generic loop of the above example
         stop, l_inputs, l_levels, n_it = False, None, None, 0
         while not stop:
@@ -490,23 +494,29 @@ class Yala(object):
             l_amplifiers = [get_amplifier_firing_graph(sax_i, l_levels[i]) for i, sax_i in enumerate(l_inputs)]
             l_activations = [amp.propagate(X) for amp in l_amplifiers]
 
-            print(l_amplifiers[0].propagate(X).sum(axis=0))
-            if l_activations[0].sum() < 100:
+            print("Amplifier info: \n")
+            print(f"activation left: {l_activations[0].sum(axis=0)}, activations right ?")
+
+            if l_activations[0].tocsc()[:, 0].sum() < 100:
                 stop = True
                 break
-
-            current_final = l_amplifiers[0].copy()
 
             for i, sax_x in enumerate(l_activations[:1]):
                 sax_inner = sax_x.astype(int).T.dot(X)
                 sax_I, level = amplify_bits(
-                    sax_inner, l_amplifiers[i].I.A[:, 0], ax_base_activations, l_levels[i], mapping_feature_input, 0.5
+                    sax_inner, l_amplifiers[i].I.A[:, 0], ax_base_activations, l_levels[i], mapping_feature_input, 0.5,
                 )
 
                 if n_it == 0:
                     level = 6
 
-            print(sax_I.nnz, level)
+            final_level = sax_I.astype(bool).T.dot(mapping_feature_input).sum() - 1
+            final_fg = get_amplifier_firing_graph(sax_I, final_level)
+
+            # Print useful information
+            print(f"# feature left {sax_I.astype(bool).T.dot(mapping_feature_input).sum()}, level left: {level}")
+            print(f'threshold selected: {round(level / sax_I.astype(bool).T.dot(mapping_feature_input).sum(), 2)}')
+
 
             # This could be computed using amplifier
             drainer_fg = get_drainer_firing_graph(sax_I, level)
@@ -516,6 +526,10 @@ class Yala(object):
             ########## Drain
             drainer_params = self.__init_parameters(np.array([target_prec]))
             drainer_fg.matrices['Iw'] = sax_I * drainer_params.weights[0]
+
+            print("Drainer info: \n")
+            print(f'drainer params: {drainer_params}')
+            print(f'activation left: {sax_activations.sum()}, precision left: {target_prec}')
 
             # split it using drained
             drained = FiringGraphDrainer(
@@ -528,6 +542,7 @@ class Yala(object):
                 drained.Iw, drained.backward_firing['i'], drainer_params.feedbacks.penalties,
                 drainer_params.feedbacks.rewards, drainer_params.weights, mapping_feature_input
             )
+            print(f"# feature left {sax_I_left.astype(bool).T.dot(mapping_feature_input).sum()}, level: {drained.levels}")
 
             l_inputs = [sax_I_left]
             l_levels = [level]
@@ -538,12 +553,44 @@ class Yala(object):
         import IPython
         IPython.embed()
 
-        level = current_final.I[:, 0].astype(bool).T.dot(mapping_feature_input).sum() - 1
-        final_fg = get_amplifier_firing_graph(current_final.I[:, 0], level)
         sax_x_final = final_fg.propagate(X).tocsc()
         sax_inner_final = sax_x_final.astype(int).T.dot(X)
         prec = sax_x_final[:, 0].T.astype(int).dot(y).A / sax_x_final[:, 0].sum()
-        print(f"Final fg at level {level} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
+        print(f"Final fg at level {final_fg.levels[0]} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
+
+
+        for j in range(mapping_feature_input.shape[1]):
+
+            ax_inner_final_sub = sax_inner_final.A[:, mapping_feature_input.A[:, j]]
+            ax_origin_mask_final = ~final_fg.I.A[:, 0][mapping_feature_input.A[:, j]]
+            d_criterion_l, d_origin_signals_l, d_other_signals_l = compute_element_amplifier(
+                ax_inner_final_sub, ax_origin_mask_final, ax_base_activations[mapping_feature_input.A[:, j]]
+            )
+
+            fig, l_axes = plt.subplots(1, 3)
+            print(d_criterion_l)
+            # Plot details of origin bits
+            l_axes[0].plot(d_origin_signals_l['bit_dist'], color="k")
+            l_axes[0].plot(d_origin_signals_l['noise_dist'], '--', color="k")
+            l_axes[0].plot(d_origin_signals_l['select'] * d_origin_signals_l['noise_dist'], 'o', color="k")
+            l_axes[0].set_title(f'Origin dist {j} - amplifier')
+
+            # Plot details of other bits
+            l_axes[1].plot(d_other_signals_l['bit_dist'], color="k")
+            l_axes[1].plot(d_other_signals_l['noise_dist'], '--', color="k")
+            l_axes[1].plot(d_other_signals_l['select'] * d_other_signals_l['noise_dist'], 'o', color="k")
+            l_axes[1].set_title(f'Other dist {j} - amplifier')
+
+            # Plot details of all selcted bits
+            l_axes[2].plot(d_other_signals_l['select'] + d_origin_signals_l['select'], color="k")
+            l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
+            plt.show()
+
+
+
+
+
+
         # END
 
         # Core loop
