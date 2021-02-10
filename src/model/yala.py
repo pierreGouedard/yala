@@ -463,20 +463,18 @@ class Yala(object):
             if l_activations[0].tocsc()[:, 0].sum() < 100:
 
                 # TODO: what about the right guy ? to deal with later
-
-                # todo: here compute the convergence criterion on final fg :
-                #   * If reached => escape
-                #   * If not reached => remove selected that does not fulfill criterion, add unselected that does not
-                #     fulfill criterion
-                import IPython
-                IPython.embed()
-                sax_inner =
-                stop, sax_I, level = sax_I, level = amplify_bits(
-                    current_fg.astype(int).T.dot(X), current_fg.I.A[:, 0], ax_base_activations, l_levels[0],
-                    mapping_feature_input, 0.5,
+                sax_I, level = amplify_bits(
+                    current_fg.propagate(X).astype(int).T.dot(X), current_fg.I.A[:, 0], ax_base_activations,
+                    current_fg.levels[0], mapping_feature_input, 0.5,
                 )
-                sax_inner = current_fg.astype(int).T.dot(X)
-                if stop:
+
+                # Criterion 1: Does selected guy has been removed ?
+                # Criterion 2: || OR Does feature has been added ? <= this one is used for the moment
+                # Criterion 3: nothing added (seems the best)
+
+                ax_feature_new = sax_I.astype(bool).T.dot(mapping_feature_input).A
+                ax_feature_current = current_fg.I[:, 0].T.dot(mapping_feature_input).A
+                if (ax_feature_new == ax_feature_current).all():
                     break
 
             else:
@@ -491,9 +489,6 @@ class Yala(object):
 
             final_level = sax_I.astype(bool).T.dot(mapping_feature_input).sum() - 1
             current_fg = get_amplifier_firing_graph(sax_I, final_level)
-
-
-
 
             # Print useful information
             print(f"# feature left {sax_I.astype(bool).T.dot(mapping_feature_input).sum()}, level left: {level}")
@@ -531,6 +526,8 @@ class Yala(object):
         # Let have a final amplification of the final firing graph
         # Todo: the idea is to say: if there all selected are > 0.9 and all non selected < 0.5 then the vertex has
         #  converged, otherwise it means that it has not converged and we should continue.
+        import IPython
+        IPython.embed()
 
         ### ANALYSIS
         sax_x_final_1 = final_fg_1.propagate(X).tocsc()

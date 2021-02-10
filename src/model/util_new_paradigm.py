@@ -113,12 +113,14 @@ def amplify_debug_display(d_criterion, d_origin_signals, d_other_signals, n):
 
 
 def amplify_bits(
-        sax_inner, ax_inputs, ax_base_activations, init_level, map_fi, new_select_thresh=0.5, debug=False
+        sax_inner, ax_inputs, ax_base_activations, init_level, map_fi, new_select_thresh=0.5, max_select_tresh=0.9,
+        debug=False
 ):
 
     # Set threshold for already selected bits
-    tresh = max((float(init_level)) / ax_inputs.T.dot(map_fi.A).sum(), new_select_thresh)
+    tresh = min(max((float(init_level)) / ax_inputs.T.dot(map_fi.A).sum(), new_select_thresh), max_select_tresh)
     sax_I, level = lil_matrix((len(ax_inputs), 1), dtype=int), 0
+
     for j in range(map_fi.shape[1]):
         ax_inner_sub, ax_origin_mask = sax_inner.A[:, map_fi.A[:, j]], ~ax_inputs[map_fi.A[:, j]]
 
@@ -139,7 +141,6 @@ def amplify_bits(
         elif (d_criterion['final_criterion'] > new_select_thresh) and not from_parent:
             sax_I[map_fi.A[:, j], 0] = (d_other_signals['select'] + d_origin_signals['select'])\
                 .astype(int)
-            #level += (d_criterion_l['final_criterion'] / 2)
 
     return sax_I, int(level)
 
