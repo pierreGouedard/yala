@@ -422,47 +422,9 @@ class Yala(object):
         print("Amplifier info: \n")
         print(f"activation left: {sax_x_left.sum(axis=0)}, activations right {sax_x_right.sum(axis=0)}")
         print('too few activation atomic state reached')
-        #
-        # # TODO: activations of both left and right are too small to be amplified. get Back to last amplified vertex and
-        # #   analyze it
-        # import IPython
-        # IPython.embed()
         level = sax_Il.astype(bool).T.dot(mapping_feature_input).sum() - 1
         final_fg_1 = get_amplifier_firing_graph(sax_Il, level)
 
-        # # Get some stats
-        # sax_x_final = final_fg.propagate(X).tocsc()
-        # sax_inner_final = sax_x_final.astype(int).T.dot(X)
-        # prec = sax_x_final[:, 0].T.astype(int).dot(y).A / sax_x_final[:, 0].sum()
-        # print(f"Final fg at level {level} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
-        #
-        # for j in range(mapping_feature_input.shape[1]):
-        #
-        #     ax_inner_final_sub = sax_inner_final.A[:, mapping_feature_input.A[:, j]]
-        #     ax_origin_mask_final = ~final_fg.I.A[:, 0][mapping_feature_input.A[:, j]]
-        #     d_criterion_l, d_origin_signals_l, d_other_signals_l = compute_element_amplifier(
-        #         ax_inner_final_sub, ax_origin_mask_final, ax_base_activations[mapping_feature_input.A[:, j]]
-        #     )
-        #
-        #     fig, l_axes = plt.subplots(1, 3)
-        #     print(d_criterion_l)
-        #     # Plot details of origin bits
-        #     l_axes[0].plot(d_origin_signals_l['bit_dist'], color="k")
-        #     l_axes[0].plot(d_origin_signals_l['noise_dist'], '--', color="k")
-        #     l_axes[0].plot(d_origin_signals_l['select'] * d_origin_signals_l['noise_dist'], 'o', color="k")
-        #     l_axes[0].set_title(f'Origin dist {j} - amplifier')
-        #
-        #     # Plot details of other bits
-        #     l_axes[1].plot(d_other_signals_l['bit_dist'], color="k")
-        #     l_axes[1].plot(d_other_signals_l['noise_dist'], '--', color="k")
-        #     l_axes[1].plot(d_other_signals_l['select'] * d_other_signals_l['noise_dist'], 'o', color="k")
-        #     l_axes[1].set_title(f'Other dist {j} - amplifier')
-        #
-        #     # Plot details of all selcted bits
-        #     l_axes[2].plot(d_other_signals_l['select'] + d_origin_signals_l['select'], color="k")
-        #     l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
-        #     plt.show()
-        #
         # # TODO: test random to see if we manage to randomly create such a specific shit
         # import IPython
         # IPython.embed()
@@ -482,41 +444,59 @@ class Yala(object):
         ### We got them !!
 
         self.server.stream_features()
-        # TODO: now what would be a generic loop of the above example
-        stop, l_inputs, l_levels, n_it = False, None, None, 0
+        stop, l_inputs, l_levels, n_it = False, [sample.T], [5], 0
         while not stop:
-            print(n_it)
-            ########## Amplify
-            if l_inputs is None:
-                l_inputs = [sample.T]
-                l_levels = [5]
+            print(f"Iteration : {n_it}")
 
+            ########## Amplify
             l_amplifiers = [get_amplifier_firing_graph(sax_i, l_levels[i]) for i, sax_i in enumerate(l_inputs)]
             l_activations = [amp.propagate(X) for amp in l_amplifiers]
 
+            # Print useful information
             print("Amplifier info: \n")
             print(f"activation left: {l_activations[0].sum(axis=0)}, activations right ?")
-            print(f'threshold selected: {round(l_levels[0] / l_amplifiers[0].I[:, 0].astype(bool).T.dot(mapping_feature_input).sum(), 2)}')
+            print(
+                f'threshold selected: '
+                f'{round(l_levels[0] / l_amplifiers[0].I[:, 0].astype(bool).T.dot(mapping_feature_input).sum(), 2)}'
+            )
 
             if l_activations[0].tocsc()[:, 0].sum() < 100:
-                stop = True
-                break
 
-            for i, sax_x in enumerate(l_activations[:1]):
-                sax_inner = sax_x.astype(int).T.dot(X)
+                # TODO: what about the right guy ? to deal with later
+
+                # todo: here compute the convergence criterion on final fg :
+                #   * If reached => escape
+                #   * If not reached => remove selected that does not fulfill criterion, add unselected that does not
+                #     fulfill criterion
+                import IPython
+                IPython.embed()
+                sax_inner =
+                stop, sax_I, level = sax_I, level = amplify_bits(
+                    current_fg.astype(int).T.dot(X), current_fg.I.A[:, 0], ax_base_activations, l_levels[0],
+                    mapping_feature_input, 0.5,
+                )
+                sax_inner = current_fg.astype(int).T.dot(X)
+                if stop:
+                    break
+
+            else:
+
+                sax_inner = l_activations[0].astype(int).T.dot(X)
                 sax_I, level = amplify_bits(
-                    sax_inner, l_amplifiers[i].I.A[:, 0], ax_base_activations, l_levels[i], mapping_feature_input, 0.5,
+                    sax_inner, l_amplifiers[0].I.A[:, 0], ax_base_activations, l_levels[0], mapping_feature_input, 0.5,
                 )
 
                 if n_it == 0:
                     level = 6
 
             final_level = sax_I.astype(bool).T.dot(mapping_feature_input).sum() - 1
-            final_fg_2 = get_amplifier_firing_graph(sax_I, final_level)
+            current_fg = get_amplifier_firing_graph(sax_I, final_level)
+
+
+
 
             # Print useful information
             print(f"# feature left {sax_I.astype(bool).T.dot(mapping_feature_input).sum()}, level left: {level}")
-
 
             # This could be computed using amplifier
             drainer_fg = get_drainer_firing_graph(sax_I, level)
@@ -548,13 +528,17 @@ class Yala(object):
             l_levels = [level]
             n_it += 1
 
+        # Let have a final amplification of the final firing graph
+        # Todo: the idea is to say: if there all selected are > 0.9 and all non selected < 0.5 then the vertex has
+        #  converged, otherwise it means that it has not converged and we should continue.
+
         ### ANALYSIS
         sax_x_final_1 = final_fg_1.propagate(X).tocsc()
         sax_inner_final_1 = sax_x_final_1.astype(int).T.dot(X)
         prec = sax_x_final_1[:, 0].T.astype(int).dot(y).A / sax_x_final_1[:, 0].sum()
         print(f"Final fg 1 at level {final_fg_1.levels} is has prec {prec} and activate {sax_x_final_1[:, 0].sum()} times")
 
-
+        final_fg_2 = current_fg.copy()
         sax_x_final_2 = final_fg_2.propagate(X).tocsc()
         sax_inner_final_2 = sax_x_final_2.astype(int).T.dot(X)
         prec = sax_x_final_2[:, 0].T.astype(int).dot(y).A / sax_x_final_2[:, 0].sum()
