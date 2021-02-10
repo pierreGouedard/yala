@@ -130,10 +130,10 @@ class Yala(object):
             split_drained_graph, compute_element_amplifier, amplify_bits
 
         from matplotlib import pyplot as plt
-        import time
         print('============== sample 1 ================')
         plot_path = 'DATA/test_new_paradigm/{}'
         ax_base_activations = X.sum(axis=0).A[0]
+        sample = X[0, :]
 
         self.server.stream_features()
         stop, l_inputs, l_levels, n_it = False, [sample.T], [5], 0
