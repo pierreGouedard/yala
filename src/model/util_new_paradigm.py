@@ -45,50 +45,6 @@ def compute_element_amplifier(ax_inner_sub, ax_origin_mask, ax_base_activations,
     return d_criterion, d_origin_signals, d_other_signals
 
 
-def single_select_amplified_bits(
-        sax_inner, ax_base_activations, ax_amplified_inputs, map_fi, selection_thresh, debug=False
-):
-
-    sax_I, level, n_select = lil_matrix((len(ax_amplified_inputs), 1), dtype=int), 0, 0
-    for j in range(map_fi.shape[1]):
-        # Get inner product between amplified signals and grid's bit of the feature
-        ax_inner_sub = sax_inner.A[:, map_fi.A[:, j]]
-        ax_origin_mask = ~ax_amplified_inputs[map_fi.A[:, j]]
-        d_criterion, d_origin_signals, d_other_signals = compute_element_amplifier(
-            ax_inner_sub, ax_origin_mask, ax_base_activations[map_fi.A[:, j]]
-        )
-
-        print(f"Criterions: {d_criterion}")
-        if debug:
-            fig, l_axes = plt.subplots(1, 3)
-
-            # Plot details of origin bits
-            l_axes[0].plot(d_origin_signals['bit_dist'], color="k")
-            l_axes[0].plot(d_origin_signals['noise_dist'], '--', color="k")
-            l_axes[0].plot(d_origin_signals['select'] * d_origin_signals['noise_dist'], 'o', color="k")
-            l_axes[0].set_title(f'Origin dist {j} - amplifier')
-
-            l_axes[1].plot(d_other_signals['bit_dist'], color="k")
-            l_axes[1].plot(d_other_signals['noise_dist'], '--', color="k")
-            l_axes[1].plot(d_other_signals['select'] * d_other_signals['noise_dist'], 'o', color="k")
-            l_axes[1].set_title(f'Other dist {j} - amplifier')
-
-            # Plot details of all selcted bits
-            l_axes[2].plot(d_other_signals['select'] + d_origin_signals['select'], color="k")
-            l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
-            plt.show()
-            # plt.savefig(plot_path.format(f'{j}_other_amplifier.png'), format='png')
-            # plt.clf()
-
-        if d_criterion['final_criterion'] > selection_thresh:
-            sax_I[map_fi.A[:, j], 0] = (d_other_signals['select'] + d_origin_signals['select']) \
-                .astype(int)
-            level += d_criterion['final_criterion'] / 2
-            n_select += 1
-
-    return sax_I, max(round(level), int(n_select / 2))
-
-
 def amplify_debug_display(d_criterion, d_origin_signals, d_other_signals, n):
 
     print(f'criterion: {d_criterion}')
@@ -143,86 +99,6 @@ def amplify_bits(
                 .astype(int)
 
     return sax_I, int(level)
-
-
-def double_select_amplified_bits(
-        sax_inner_left, sax_inner_right, ax_amplified_linputs, ax_amplified_rinputs, ax_base_activations, levell,
-        levelr, map_fi, thresh_new_selectionr=0.5, debug=False
-):
-
-    # Set threshold for already selected bits
-    treshl = (float(levell)) / ax_amplified_rinputs.T.dot(map_fi.A).sum()
-    treshr = (float(levelr)) / ax_amplified_rinputs.T.dot(map_fi.A).sum()
-
-    sax_Il = lil_matrix((len(ax_amplified_linputs), 1), dtype=int)
-    sax_Ir = lil_matrix((len(ax_amplified_linputs), 1), dtype=int)
-    levell, levelr = 0, 0
-    for j in range(map_fi.shape[1]):
-        ax_inner_left_sub = sax_inner_left.A[:, map_fi.A[:, j]]
-        ax_inner_right_sub = sax_inner_right.A[:, map_fi.A[:, j]]
-        ax_origin_mask_left = ~ax_amplified_linputs[map_fi.A[:, j]]
-        ax_origin_mask_right = ~ax_amplified_rinputs[map_fi.A[:, j]]
-        from_parent = (~ax_origin_mask_right + ~ax_origin_mask_left).any()
-
-        d_criterion_l, d_origin_signals_l, d_other_signals_l = compute_element_amplifier(
-            ax_inner_left_sub, ax_origin_mask_left, ax_base_activations[map_fi.A[:, j]]
-        )
-
-        d_criterion_r, d_origin_signals_r, d_other_signals_r = compute_element_amplifier(
-            ax_inner_right_sub, ax_origin_mask_right, ax_base_activations[map_fi.A[:, j]],
-        )
-
-        print(f'criterion left: {d_criterion_l}')
-        #print(f'criterion right: {d_criterion_r}')
-
-        if debug:
-            fig, l_axes = plt.subplots(1, 3)
-
-            # Plot details of origin bits
-            l_axes[0].plot(d_origin_signals_l['bit_dist'], color="k")
-            l_axes[0].plot(d_origin_signals_l['noise_dist'], '--', color="k")
-            l_axes[0].plot(d_origin_signals_l['select'] * d_origin_signals_l['noise_dist'], 'o', color="k")
-            l_axes[0].plot(d_origin_signals_r['bit_dist'], color="b")
-            l_axes[0].plot(d_origin_signals_r['noise_dist'], '--', color="b")
-            l_axes[0].plot(d_origin_signals_r['select'] * d_origin_signals_r['noise_dist'], 'o', color="b")
-            l_axes[0].set_title(f'Origin dist {j} - amplifier')
-
-            # Plot details of other bits
-            l_axes[1].plot(d_other_signals_l['bit_dist'], color="k")
-            l_axes[1].plot(d_other_signals_l['noise_dist'], '--', color="k")
-            l_axes[1].plot(d_other_signals_l['select'] * d_other_signals_l['noise_dist'], 'o', color="k")
-            l_axes[1].plot(d_other_signals_r['bit_dist'], color="b")
-            l_axes[1].plot(d_other_signals_r['noise_dist'], '--', color="b")
-            l_axes[1].plot(d_other_signals_r['select'] * d_other_signals_r['noise_dist'], 'o', color="b")
-            l_axes[1].set_title(f'Other dist {j} - amplifier')
-
-            # Plot details of all selcted bits
-            l_axes[2].plot((d_other_signals_l['select'] + d_origin_signals_l['select']), color="k")
-            l_axes[2].plot((d_other_signals_r['select'] + d_origin_signals_r['select']), color="b")
-            l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
-            plt.show()
-
-        if (d_criterion_l['final_criterion'] > treshl) and from_parent:
-            sax_Il[map_fi.A[:, j], 0] = (d_other_signals_l['select'] + d_origin_signals_l['select'])\
-                .astype(int)
-            levell += d_criterion_l['final_criterion']
-
-        elif (d_criterion_l['final_criterion'] > thresh_new_selectionr) and not from_parent:
-            sax_Il[map_fi.A[:, j], 0] = (d_other_signals_l['select'] + d_origin_signals_l['select'])\
-                .astype(int)
-            levelr += (d_criterion_l['final_criterion'] / 2)
-
-        if (d_criterion_r['final_criterion'] > treshr) and from_parent:
-            sax_Ir[map_fi.A[:, j], 0] = (d_other_signals_r['select'] + d_origin_signals_r['select'])\
-                .astype(int)
-            levelr += d_criterion_r['final_criterion']
-
-        elif (d_criterion_r['final_criterion'] > thresh_new_selectionr) and not from_parent:
-            sax_Ir[map_fi.A[:, j], 0] = (d_other_signals_r['select'] + d_origin_signals_r['select'])\
-                .astype(int)
-            levelr += (d_criterion_r['final_criterion'] / 2)
-
-    return (sax_Il, int(levell)), (sax_Ir, int(levelr))
 
 
 def get_binomial_upper_ci(ax_p, conf, n):
@@ -286,3 +162,21 @@ def init_param_new(ax_precision, min_gain, min_firing=250):
         weights=((ax_p - ((ax_precision - 2 * min_gain) * (ax_p + ax_r))) * min_firing).astype(int) + 1
     )
     return drainer_params
+
+
+from scipy.sparse import lil_matrix
+
+
+def create_random_fg(fg, map_fi, level):
+
+    ax_bit_counts = fg.I[:, 0].T.dot(map_fi.astype(int)).A[0]
+    test_I = lil_matrix(fg.I[:, 0].shape)
+
+    for j in range(map_fi.shape[1]):
+        n_bits = map_fi[:, j].sum()
+        ax_rvalues = np.random.binomial(1, ax_bit_counts[j] / n_bits, n_bits)
+        test_I[map_fi.A[:, j], 0] = ax_rvalues
+
+    return YalaBasePatterns.from_input_matrix(
+        test_I.tocsc(), [{'indices': 0, 'output_id': 0, 'label': 0, 'precision': 0}], np.array([level])
+    )
