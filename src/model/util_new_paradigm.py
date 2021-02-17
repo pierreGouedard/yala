@@ -1,8 +1,9 @@
 # Global import
-from scipy.stats import norm, entropy
+from scipy.stats import norm
 from scipy.sparse import lil_matrix, diags
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.ndimage.interpolation import shift
 
 # Local import
 from src.model.patterns import YalaBasePatterns
@@ -10,7 +11,7 @@ from .utils import set_feedbacks
 from .data_models import DrainerFeedbacks, DrainerParameters
 
 
-def compute_element_amplifier(ax_inner_sub, ax_origin_mask, ax_base_activations, debug=False):
+def compute_element_amplifier(ax_inner_sub, ax_origin_mask, ax_base_activations, ci_select=0.9, debug=False):
 
     n_other, n_origin = ax_inner_sub[0, ax_origin_mask].sum(), ax_inner_sub[0, ~ax_origin_mask].sum()
 
@@ -19,13 +20,13 @@ def compute_element_amplifier(ax_inner_sub, ax_origin_mask, ax_base_activations,
 
     # validation of origin bits
     ax_origin_bit_dist = ax_inner_sub[0, :] * ~ax_origin_mask / (n_other + n_origin)
-    ax_origin_noise_dist = get_binomial_upper_ci(ax_base_dist, 0.9, n_other + n_origin)
+    ax_origin_noise_dist = get_binomial_upper_ci(ax_base_dist, ci_select, n_other + n_origin)
     ax_origin_selection = ax_origin_bit_dist > ax_origin_noise_dist
 
     # Validation of other bits
     ax_base_dist = ax_base_activations * ax_origin_mask / (ax_base_activations * ax_origin_mask).sum()
     ax_other_bit_dist = (ax_inner_sub[0, :] * ax_origin_mask) / n_other
-    ax_other_noise_dist = get_binomial_upper_ci(ax_base_dist, 0.85, n_other)
+    ax_other_noise_dist = get_binomial_upper_ci(ax_base_dist, ci_select - 0.05, n_other)
     ax_other_selection = ax_other_bit_dist > ax_other_noise_dist
 
     # Compute criterions
@@ -101,6 +102,49 @@ def amplify_bits(
     return sax_I, int(level)
 
 
+def final_bit_selection(fg, map_fi, X, ax_base_activations, noise_level=1):
+
+    n_features = fg.I.T.dot(map_fi).sum() / 2
+    fg.levels = np.array([n_features, n_features - noise_level])
+    sax_x = fg.propagate(X).tocsc()
+    sax_inner = sax_x.astype(int).T.dot(X)
+
+    sax_I, level, debug = lil_matrix((fg.I.shape[0], 1), dtype=int), 0, False
+    for j in range(map_fi.shape[1]):
+        ax_inner_sub = sax_inner.A[:, map_fi.A[:, j]]
+        ax_origin_mask = ~fg.I.A[:, 0][map_fi.A[:, j]]
+        ax_base_x_sub = ax_base_activations[map_fi.A[:, j]]
+
+        n_origin = ax_inner_sub[0, ~ax_origin_mask].sum()
+
+        ax_base_dist = (ax_base_x_sub * ~ax_origin_mask / ax_base_x_sub.sum())
+        ax_base_dist *= ax_inner_sub[1, ax_origin_mask].sum() / n_origin
+
+        # validation of origin bits
+        ax_origin_bit_dist = ax_inner_sub[0, :] * ~ax_origin_mask / n_origin
+        ax_origin_noise_dist = get_binomial_upper_ci(ax_base_dist, 0.90, n_origin)
+        ax_select = (ax_origin_bit_dist > ax_origin_noise_dist).astype(int)
+
+        # Smooth selection of bits
+        stop, ax_select_old = False, ax_select
+        while not stop:
+            ax_select_new = (ax_select + shift(ax_select, 1, cval=1) + shift(ax_select, -1, cval=1) > 1)
+            stop = (ax_select_new == ax_select_old).all()
+            ax_select_old = ax_select_new
+            ax_select *= ax_select_new
+
+        criterion = ax_inner_sub[0, ax_select_new.astype(bool)].sum() / n_origin
+        if criterion > 0.8:
+            sax_I[map_fi.A[:, j], 0] = ax_select_new.astype(int)
+            level += 1
+
+    final_fg = YalaBasePatterns.from_input_matrix(
+        sax_I, [{'indices': 0, 'output_id': 0, 'label': 0, 'precision': 0}], np.array([level])
+    )
+
+    return final_fg
+
+
 def get_binomial_upper_ci(ax_p, conf, n):
     alpha = 1 - conf
     return ax_p + (norm.ppf(1 - (alpha / 2)) * np.sqrt(ax_p * (1 - ax_p) / n))
@@ -162,9 +206,6 @@ def init_param_new(ax_precision, min_gain, min_firing=250):
         weights=((ax_p - ((ax_precision - 2 * min_gain) * (ax_p + ax_r))) * min_firing).astype(int) + 1
     )
     return drainer_params
-
-
-from scipy.sparse import lil_matrix
 
 
 def create_random_fg(fg, map_fi, level):

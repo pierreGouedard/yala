@@ -127,8 +127,8 @@ class Yala(object):
         # TODO: test amplifier
         from src.model.patterns import YalaBasePatterns
         from src.model.util_new_paradigm import get_amplifier_firing_graph, get_drainer_firing_graph, \
-            split_drained_graph, compute_element_amplifier, amplify_bits, create_random_fg
-
+            split_drained_graph, final_bit_selection, amplify_bits, create_random_fg, get_binomial_upper_ci
+        from scipy.ndimage.interpolation import shift
         from matplotlib import pyplot as plt
         import time
         print('============== sample 1 ================')
@@ -216,8 +216,12 @@ class Yala(object):
             l_levels = [level]
             n_it += 1
 
-        ### ANALYSIS
+        # FINAL feature and but selection (diff noise level for denoising)
+        final_fg = final_bit_selection(current_fg, mapping_feature_input, X, ax_base_activations, noise_level=2)
 
+
+        # TODO: the analysis is done may be, before starting to code things clearly, try  to test a simple method to
+        #  avoid early failure of draining by a clever selection of which feature to drain 
         # Analysis draining
         drainer_fg = get_drainer_firing_graph(current_fg.matrices['Iw'][:, 0], current_fg.levels[0])
         drainer_params = self.__init_parameters(np.array([0.001]))
@@ -236,64 +240,25 @@ class Yala(object):
             debug=True, save=True
         )
 
-
         # Analysis activation
-        current_fg.levels[0] += 1
-        sax_x_final = current_fg.propagate(X).tocsc()
-        sax_inner_final = sax_x_final.astype(int).T.dot(X)
+        sax_x_final = final_fg.propagate(X).tocsc()
         prec = sax_x_final[:, 0].T.astype(int).dot(y).A / sax_x_final[:, 0].sum()
-        print(f"Final fg 2 at level {current_fg.levels[0]} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
-
-        for j in range(mapping_feature_input.shape[1]):
-
-            d_criterion, d_origin_signals, d_other_signals = compute_element_amplifier(
-                sax_inner_final.A[:, mapping_feature_input.A[:, j]],
-                ~current_fg.I.A[:, 0][mapping_feature_input.A[:, j]],
-                ax_base_activations[mapping_feature_input.A[:, j]]
-            )
-
-            print(d_criterion)
-
-            # Plot details of origin bits
-            fig, l_axes = plt.subplots(1, 3)
-            l_axes[0].plot(d_origin_signals['bit_dist'], color="k")
-            l_axes[0].plot(d_origin_signals['noise_dist'], '--', color="k")
-            l_axes[0].plot(d_origin_signals['select'] * d_origin_signals['noise_dist'], 'o', color="k")
-            l_axes[0].set_title(f'Origin dist {j} - amplifier')
-
-            # Plot details of other bits
-            l_axes[1].plot(d_other_signals['bit_dist'], color="k")
-            l_axes[1].plot(d_other_signals['noise_dist'], '--', color="k")
-            l_axes[1].plot(d_other_signals['select'] * d_other_signals['noise_dist'], 'o', color="k")
-            l_axes[1].set_title(f'Other dist {j} - amplifier')
-
-            # Plot details of all selected bits
-            l_axes[2].plot(d_other_signals['select'] + d_origin_signals['select'], color="k")
-            l_axes[2].set_title(f'dist {j} of selected bits - amplifier')
-            plt.show()
-
-        import IPython
-        IPython.embed()
+        print(f"Final fg at level {final_fg.levels[0]} is has prec {prec} and activate {sax_x_final[:, 0].sum()} times")
 
         # Analysis compare against lucky sampling
-        n_features = current_fg.I[:, 0].T.dot(mapping_feature_input).sum()
+        n_features = final_fg.I[:, 0].T.dot(mapping_feature_input).sum()
         ax_activations = np.zeros((2, n_features))
         for i in range(n_features - 5):
             # Random firing graph
-            test_fg = create_random_fg(current_fg, mapping_feature_input, n_features - i)
+            test_fg = create_random_fg(final_fg, mapping_feature_input, n_features - i)
             ax_activations[0, i] = test_fg.propagate(X).sum()
 
-            current_fg.levels[0] = n_features - i
-            ax_activations[1, i] = current_fg.propagate(X).tocsc()[:, 0].sum()
+            final_fg.levels[0] = n_features - i
+            ax_activations[1, i] = final_fg.propagate(X).tocsc()[:, 0].sum()
 
         plt.plot(ax_activations[0, :], color='k')
         plt.plot(ax_activations[1, :], color='b')
         plt.show()
-
-        # TODO: method won't change anymore.
-        #  * last removal of useless feature using full level
-        #  * last bit selection using full level and smooth select
-        #  * Return vertice with full level -1 and corresponding proba.
 
         # TODO:
         #   * implement unefficient method and compare all children
