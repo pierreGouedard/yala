@@ -3,146 +3,132 @@ from scipy.stats import norm
 from scipy.sparse import lil_matrix, diags
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage.interpolation import shift
+from dataclasses import asdict
 
 # Local import
 from src.model.patterns import YalaBasePatterns
 from .utils import set_feedbacks
 from .data_models import DrainerFeedbacks, DrainerParameters
+from firing_graph.solver.drainer import FiringGraphDrainer
 
 
-def compute_element_amplifier(ax_inner_sub, ax_origin_mask, ax_base_activations, ci_select=0.9, debug=False):
+def compute_element_amplifier(ax_inner, ax_origin_mask, ax_base_activations, ci_select=0.8, gap_fill=False, gap_fill_len=2):
 
-    n_other, n_origin = ax_inner_sub[0, ax_origin_mask].sum(), ax_inner_sub[0, ~ax_origin_mask].sum()
+    n_vertex = ax_inner[0, ax_origin_mask].sum() + ax_inner[0, ~ax_origin_mask].sum()
 
-    ax_base_dist = (ax_base_activations * ~ax_origin_mask / ax_base_activations.sum())
-    ax_base_dist *= ax_inner_sub[1, ax_origin_mask].sum() / (n_other + n_origin)
+    # Get noisy distribution
+    ax_noise_dist = ax_base_activations / ax_base_activations.sum()
+    ax_noise_dist = get_binomial_upper_ci(ax_noise_dist, ci_select, ax_inner[1, :].sum())
 
-    # validation of origin bits
-    ax_origin_bit_dist = ax_inner_sub[0, :] * ~ax_origin_mask / (n_other + n_origin)
-    ax_origin_noise_dist = get_binomial_upper_ci(ax_base_dist, ci_select, n_other + n_origin)
-    ax_origin_selection = ax_origin_bit_dist > ax_origin_noise_dist
+    # Get observation distribution
+    ax_obs = ax_inner.sum(axis=0) - ((ax_inner[0, :] * ax_origin_mask) + (ax_inner[1, :] * ~ax_origin_mask))
+    ax_obs_dist = ax_obs / ax_obs.sum()
+    ax_select = ax_obs_dist > ax_noise_dist
 
-    # Validation of other bits
-    ax_base_dist = ax_base_activations * ax_origin_mask / (ax_base_activations * ax_origin_mask).sum()
-    ax_other_bit_dist = (ax_inner_sub[0, :] * ax_origin_mask) / n_other
-    ax_other_noise_dist = get_binomial_upper_ci(ax_base_dist, ci_select - 0.05, n_other)
-    ax_other_selection = ax_other_bit_dist > ax_other_noise_dist
+    # Gap fill if necessary
+    if gap_fill and len(ax_base_activations) > 10:
+        for i in range(len(ax_select) - gap_fill_len):
+            ind = gap_fill_len + i
+            check_after = ax_select[ind] and ax_select[ind + 1: ind + gap_fill_len + 2].any()
+            check_before = ax_select[ind] and ax_select[ind - gap_fill_len: ind].any()
+            right_border = ax_select[ind] and (ind == len(ax_select) - 1)
 
-    # Compute criterions
-    d_criterion = {}
-    d_criterion['n_origin_selected'] = ax_inner_sub[0, ax_origin_selection].sum()
-    d_criterion['n_other_selected'] = ax_inner_sub[0, ax_other_selection].sum()
-    d_criterion['n_all_significant'] = d_criterion['n_origin_selected'] + d_criterion['n_other_selected']
-    d_criterion['n_vertex'] = n_other + n_origin
-    d_criterion['final_criterion'] = d_criterion['n_all_significant'] / d_criterion['n_vertex']
+            ax_select[ind] = check_before | check_after | right_border
+            ax_select[ind] |= ax_select[ind - 1] and ax_select[ind: ind + gap_fill_len + 1].any()
 
-    if debug:
-        import IPython
-        IPython.embed()
+    # Compute criterion and save signals
+    d_criterions = dict(
+        n_selected=ax_inner[0, ax_select].sum(), n_vertex=n_vertex,
+        criterion=round(ax_inner[0, ax_select].sum() / n_vertex, 3),
+        idx_select=np.arange(ax_origin_mask.shape[0])[~ax_origin_mask],
+    )
+    d_signals = dict(obs_dist=ax_obs_dist, noise_dist=ax_noise_dist, selection=ax_select)
 
-    d_origin_signals = {"bit_dist": ax_origin_bit_dist, "noise_dist": ax_origin_noise_dist, "select": ax_origin_selection}
-    d_other_signals = {"bit_dist": ax_other_bit_dist, "noise_dist": ax_other_noise_dist, "select": ax_other_selection}
-    return d_criterion, d_origin_signals, d_other_signals
+    return d_criterions, d_signals
 
 
-def amplify_debug_display(d_criterion, d_origin_signals, d_other_signals, n):
-
-    print(f'criterion: {d_criterion}')
-    fig, l_axes = plt.subplots(1, 3)
+def amplify_debug_display(d_signals, n, add=None):
 
     # Plot details of origin bits
-    l_axes[0].plot(d_origin_signals['bit_dist'], color="k")
-    l_axes[0].plot(d_origin_signals['noise_dist'], '--', color="k")
-    l_axes[0].plot(d_origin_signals['select'] * d_origin_signals['noise_dist'], 'o', color="k")
-    l_axes[0].set_title(f'Origin dist {n} - amplifier')
-
-    # Plot details of other bits
-    l_axes[1].plot(d_other_signals['bit_dist'], color="k")
-    l_axes[1].plot(d_other_signals['noise_dist'], '--', color="k")
-    l_axes[1].plot(d_other_signals['select'] * d_other_signals['noise_dist'], 'o', color="k")
-    l_axes[1].set_title(f'Other dist {n} - amplifier')
-
-    # Plot details of all selcted bits
-    l_axes[2].plot((d_other_signals['select'] + d_origin_signals['select']), color="k")
-    l_axes[2].set_title(f'dist {n} of selected bits - amplifier')
+    plt.plot(d_signals['obs_dist'], color="k")
+    plt.plot(d_signals['noise_dist'], '--', color="k")
+    plt.plot(d_signals['selection'] * d_signals['noise_dist'], 'o', color="k")
+    if add is not None:
+        plt.plot(add * d_signals['noise_dist'], '+', color="b")
+    plt.title(f'Bit amplification for feature {n}')
     plt.show()
 
 
-def amplify_bits(
-        sax_inner, ax_inputs, ax_base_activations, init_level, map_fi, new_select_thresh=0.5, max_select_tresh=0.9,
-        debug=False
-):
+def amplify_bits(sax_inner, ax_inputs, ax_base_activations, map_fi, ax_thresh, debug=False):
 
-    # Set threshold for already selected bits
-    tresh = min(max((float(init_level)) / ax_inputs.T.dot(map_fi.A).sum(), new_select_thresh), max_select_tresh)
+    # Init amplified vertex params
     sax_I, level = lil_matrix((len(ax_inputs), 1), dtype=int), 0
-
-    for j in range(map_fi.shape[1]):
-        ax_inner_sub, ax_origin_mask = sax_inner.A[:, map_fi.A[:, j]], ~ax_inputs[map_fi.A[:, j]]
+    n_vertex = sax_inner[0, :].dot(map_fi).max()
+    for i in range(map_fi.shape[1]):
+        ax_inner_sub, ax_origin_mask = sax_inner.A[:, map_fi.A[:, i]], ~ax_inputs[map_fi.A[:, i]]
 
         from_parent = (~ax_origin_mask).any()
-
-        d_criterion, d_origin_signals, d_other_signals = compute_element_amplifier(
-            ax_inner_sub, ax_origin_mask, ax_base_activations[map_fi.A[:, j]]
+        d_criterions, d_signals = compute_element_amplifier(
+            ax_inner_sub, ax_origin_mask, ax_base_activations[map_fi.A[:, i]]
         )
-        print(f'criterion: {d_criterion}')
+
+        # Display info and debug
         if debug:
-            amplify_debug_display(d_criterion, d_origin_signals, d_other_signals, j)
+            print(f'criterion: {d_criterions}')
+            amplify_debug_display(d_signals, i)
 
-        if (d_criterion['final_criterion'] > tresh) and from_parent:
-            sax_I[map_fi.A[:, j], 0] = (d_other_signals['select'] + d_origin_signals['select'])\
-                .astype(int)
-            level += d_criterion['final_criterion']
+        # build new vertex's inputs
+        if d_criterions['criterion'] > ax_thresh[i] and d_criterions['n_selected'] / n_vertex > 0.5:
+            sax_I[map_fi.A[:, i], 0] = d_signals['selection'].astype(int)
 
-        elif (d_criterion['final_criterion'] > new_select_thresh) and not from_parent:
-            sax_I[map_fi.A[:, j], 0] = (d_other_signals['select'] + d_origin_signals['select'])\
-                .astype(int)
+            if from_parent:
+                level += d_criterions['criterion']
 
-    return sax_I, int(level)
+    return sax_I, int(level), ax_thresh
 
 
-def final_bit_selection(fg, map_fi, X, ax_base_activations, noise_level=1):
+def final_bit_selection(fg, map_fi, X, ax_base_activations, ax_thresh, margin_lvl=2, debug=False):
+    stop = False
+    while not stop:
+        sax_x = fg.propagate(X).tocsc()
+        if sax_x[:, 0].sum() > 10:
+            sax_inner = sax_x.astype(int).T.dot(X)
+            stop = True
+            break
+        fg.levels -= 1
 
-    n_features = fg.I.T.dot(map_fi).sum() / 2
-    fg.levels = np.array([n_features, n_features - noise_level])
-    sax_x = fg.propagate(X).tocsc()
-    sax_inner = sax_x.astype(int).T.dot(X)
+    n_vertex = sax_inner[0, :].dot(map_fi).max()
+    sax_I = lil_matrix((fg.I.shape[0], 1), dtype=int)
 
-    sax_I, level, debug = lil_matrix((fg.I.shape[0], 1), dtype=int), 0, False
+    count_added, count_removed, count_features, level = 0, 0, 0, 0
     for j in range(map_fi.shape[1]):
-        ax_inner_sub = sax_inner.A[:, map_fi.A[:, j]]
-        ax_origin_mask = ~fg.I.A[:, 0][map_fi.A[:, j]]
-        ax_base_x_sub = ax_base_activations[map_fi.A[:, j]]
+        from_parent = (fg.I.A[:, 0][map_fi.A[:, j]]).any()
 
-        n_origin = ax_inner_sub[0, ~ax_origin_mask].sum()
+        d_criterion, d_signals = compute_element_amplifier(
+            sax_inner.A[:, map_fi.A[:, j]], ~fg.I.A[:, 0][map_fi.A[:, j]], ax_base_activations[map_fi.A[:, j]],
+            ci_select=0.5, gap_fill=True
+        )
 
-        ax_base_dist = (ax_base_x_sub * ~ax_origin_mask / ax_base_x_sub.sum())
-        ax_base_dist *= ax_inner_sub[1, ax_origin_mask].sum() / n_origin
+        if debug:
+            print(d_criterion)
+            amplify_debug_display(d_signals, j)
 
-        # validation of origin bits
-        ax_origin_bit_dist = ax_inner_sub[0, :] * ~ax_origin_mask / n_origin
-        ax_origin_noise_dist = get_binomial_upper_ci(ax_base_dist, 0.90, n_origin)
-        ax_select = (ax_origin_bit_dist > ax_origin_noise_dist).astype(int)
+        if d_criterion['criterion'] >= 0.8 and d_criterion['n_selected'] / n_vertex > 0.5:
+            sax_I[map_fi.A[:, j], 0] = d_signals['selection'].astype(int)
+            level += d_criterion['criterion']
+            count_features += 1
 
-        # Smooth selection of bits
-        stop, ax_select_old = False, ax_select
-        while not stop:
-            ax_select_new = (ax_select + shift(ax_select, 1, cval=1) + shift(ax_select, -1, cval=1) > 1)
-            stop = (ax_select_new == ax_select_old).all()
-            ax_select_old = ax_select_new
-            ax_select *= ax_select_new
+            count_added += int((not from_parent))
 
-        criterion = ax_inner_sub[0, ax_select_new.astype(bool)].sum() / n_origin
-        if criterion > 0.8:
-            sax_I[map_fi.A[:, j], 0] = ax_select_new.astype(int)
-            level += 1
+        else:
+            count_removed += int(from_parent)
 
-    final_fg = YalaBasePatterns.from_input_matrix(
-        sax_I, [{'indices': 0, 'output_id': 0, 'label': 0, 'precision': 0}], np.array([level])
-    )
+    stop = (count_added == 0) and (count_removed == 0)
 
-    return final_fg
+    if stop:
+        return sax_I, count_features - margin_lvl, ax_thresh, True
+    else:
+        return sax_I, int(level), ax_thresh + 1e-1, False
 
 
 def get_binomial_upper_ci(ax_p, conf, n):
@@ -221,3 +207,63 @@ def create_random_fg(fg, map_fi, level):
     return YalaBasePatterns.from_input_matrix(
         test_I.tocsc(), [{'indices': 0, 'output_id': 0, 'label': 0, 'precision': 0}], np.array([level])
     )
+
+
+def show_significance_plot(fg, map_fi):
+
+    n_features = fg.I[:, 0].T.dot(map_fi).sum()
+    ax_activations = np.zeros((2, n_features))
+    for i in range(n_features - 1):
+        # Random firing graph
+        test_fg = create_random_fg(fg, map_fi, n_features - i)
+        ax_activations[0, i] = test_fg.propagate(X).sum()
+
+        fg.levels[0] = n_features - i
+        ax_activations[1, i] = fg.propagate(X).tocsc()[:, 0].sum()
+
+    plt.plot(ax_activations[0, :], color='k')
+    plt.plot(ax_activations[1, :], color='b')
+    plt.show()
+
+
+def show_activation_stats(fg, map_fi, X, y):
+    n_features = fg.I.T.dot(map_fi).sum()
+    sax_x_final = fg.propagate(X).tocsc()
+    prec = sax_x_final[:, 0].T.astype(int).dot(y).A / sax_x_final[:, 0].sum()
+    print(
+        f"Final fg with # feature: {n_features}, level: {fg.levels[0]}, prec: {prec}, "
+        f"# activate: {sax_x_final[:, 0].sum()} times"
+    )
+
+
+def show_draining_stats(fg, drainer_params, batch_size, server, draining_size):
+    drainer_fg = get_drainer_firing_graph(fg.matrices['Iw'][:, 0], fg.levels[0])
+    drainer_fg.matrices['Iw'] = drainer_fg.I * drainer_params.weights[0]
+
+    # split it using drained
+    drained = FiringGraphDrainer(
+        drainer_fg, server, batch_size, **asdict(drainer_params.feedbacks)
+    ) \
+        .drain_all(n_max=draining_size) \
+        .firing_graph
+
+    sax_I_left, _ = split_drained_graph(
+        drained.Iw, drained.backward_firing['i'], drainer_params.feedbacks.penalties,
+        drainer_params.feedbacks.rewards, drainer_params.weights, mapping_feature_input,
+        debug=True, save=True
+    )
+
+
+def show_diff_fg(fga, fgb, map_fi):
+    for j in range(map_fi.shape[1]):
+
+        ax_ina = fga.I.A[:, 0][map_fi.A[:, j]]
+        ax_inb = fgb.I.A[:, 0][map_fi.A[:, j]]
+
+        # Plot diff inputs
+        plt.plot(ax_ina, color="k")
+        plt.plot(ax_inb, '--', color="b")
+        plt.title(f'Selected bits for feature {j}')
+        plt.show()
+
+
