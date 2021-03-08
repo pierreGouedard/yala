@@ -12,6 +12,8 @@ from .data_models import DrainerFeedbacks, DrainerParameters
 from firing_graph.solver.drainer import FiringGraphDrainer
 
 
+
+
 def compute_element_amplifier(ax_inner, ax_origin_mask, ax_base_activations, ci_select=0.8, gap_fill=False, gap_fill_len=2):
 
     n_vertex = ax_inner[0, ax_origin_mask].sum() + ax_inner[0, ~ax_origin_mask].sum()
@@ -111,7 +113,7 @@ def final_bit_selection(fg, map_fi, X, ax_base_activations, ax_thresh, margin_lv
 
         if debug:
             print(d_criterion)
-            amplify_debug_display(d_signals, j)
+            amplify_debug_display(d_signals, j, add=fg.I.A[:, 0][map_fi.A[:, j]])
 
         if d_criterion['criterion'] >= 0.8 and d_criterion['n_selected'] / n_vertex > 0.5:
             sax_I[map_fi.A[:, j], 0] = d_signals['selection'].astype(int)
@@ -149,40 +151,33 @@ def get_amplifier_firing_graph(sax_I, level):
     return amplifier
 
 
-def get_drainer_firing_graph(sax_I, level):
+def get_drainer_firing_graph(sax_I, level, map_fi, n_drain=100):
     firing_graph = YalaBasePatterns.from_input_matrix(
         sax_I, [{'indices': 0, 'output_id': 0, 'label': 0, 'precision': 0}], np.array([level])
     )
-    firing_graph.matrices['Im'] = sax_I
+
+    sax_input_features = sax_I.astype(bool).T.dot(map_fi)
+    if n_drain < sax_input_features.nnz:
+
+        # Set draining mask to True only for features selected for draining
+        ax_idx = np.random.choice(sax_input_features.nonzero()[1], sax_input_features.nnz - n_drain, replace=False)
+        sax_input_features[0, ax_idx] = False
+        firing_graph.matrices['Im'] = sax_I.multiply(map_fi.dot(sax_input_features.T))
+
+    else:
+        firing_graph.matrices['Im'] = sax_I
 
     return firing_graph
 
 
-def split_drained_graph(sax_weight, sax_count, ax_p, ax_r, ax_w, map_fi, debug=False, save=False):
+def split_drained_graph(sax_weight, sax_count):
+
     # Get input weights and count
-    sax_mask = (sax_weight > 0).multiply(sax_count > 0)
+    sax_common = ((sax_weight > 0).astype(int) - (sax_count > 0).astype(int) > 0)
+    sax_left_mask = (sax_weight > 0).multiply((sax_count > 0))
+    sax_right_mask = ((sax_count > 0).astype(int) - sax_left_mask.astype(int) > 0)
 
-    if debug:
-        # Compute precision
-        sax_nom = sax_weight.multiply(sax_mask) - sax_mask.dot(diags(ax_w, format='csc'))
-        sax_denom = sax_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc')))
-        sax_precision = sax_nom.multiply(sax_denom.astype(float).power(-1))
-        sax_precision += (sax_precision != 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
-
-        plot_path = 'DATA/test_new_paradigm/{}'
-        for i in range(map_fi.shape[1]):
-            ax_precision = sax_precision[map_fi[:, i]].A[0]
-            plt.plot(ax_precision, color='b')
-            plt.plot((ax_precision > 0).astype(int), color='r')
-            plt.title(f'feature {i} - drainer')
-            if save:
-                plt.savefig(plot_path.format(f'{i}_drainer.png'), format='png')
-                plt.clf()
-            else:
-                plt.show()
-
-    sax_residual_mask = ((sax_count > 0) - sax_mask)
-    return sax_mask, sax_residual_mask
+    return sax_left_mask + sax_common, sax_right_mask + sax_common
 
 
 def init_param_new(ax_precision, min_gain, min_firing=250):
@@ -209,7 +204,7 @@ def create_random_fg(fg, map_fi, level):
     )
 
 
-def show_significance_plot(fg, map_fi):
+def show_significance_plot(fg, map_fi, X):
 
     n_features = fg.I[:, 0].T.dot(map_fi).sum()
     ax_activations = np.zeros((2, n_features))
@@ -236,22 +231,45 @@ def show_activation_stats(fg, map_fi, X, y):
     )
 
 
-def show_draining_stats(fg, drainer_params, batch_size, server, draining_size):
-    drainer_fg = get_drainer_firing_graph(fg.matrices['Iw'][:, 0], fg.levels[0])
-    drainer_fg.matrices['Iw'] = drainer_fg.I * drainer_params.weights[0]
+def show_draining_stats(fg, map_fi, X, y):
 
-    # split it using drained
-    drained = FiringGraphDrainer(
-        drainer_fg, server, batch_size, **asdict(drainer_params.feedbacks)
-    ) \
-        .drain_all(n_max=draining_size) \
-        .firing_graph
+    sax_x = fg.propagate(X).tocsc()
+    sax_inner = X.multiply(sax_x[:, [0] * X.shape[1]])
+    ax_x = sax_inner.sum(axis=0).A[0]
+    ax_prec = sax_inner.T.astype(int).dot(y).A[:, 0] / (ax_x + 1e-6)
 
-    sax_I_left, _ = split_drained_graph(
-        drained.Iw, drained.backward_firing['i'], drainer_params.feedbacks.penalties,
-        drainer_params.feedbacks.rewards, drainer_params.weights, mapping_feature_input,
-        debug=True, save=True
-    )
+    for j in range(map_fi.shape[1]):
+        ax_prec_sub = ax_prec[map_fi.A[:, j]]
+
+        # Plot prec
+        plt.plot(ax_prec_sub, color="k")
+        plt.plot(fg.I.A[map_fi.A[:, j], 0], "--", color='b')
+        plt.plot(ax_x[map_fi.A[:, j]] / ax_x[map_fi.A[:, j]].sum(), "*", color='k')
+
+        plt.title(f'Precision bits for feature {j}')
+        plt.show()
+
+
+def reselect_graph(fg, map_fi, X):
+    ax_inner = fg.propagate(X).astype(int).T.dot(X).A[0]
+    sax_I, level = lil_matrix(fg.I.shape), 0
+
+    for i in range(map_fi.shape[1]):
+        ax_dist_activation = ax_inner[map_fi.A[:, i]] / ax_inner[map_fi.A[:, i]].sum()
+
+        # Show input and activation
+        plt.plot(fg.I.A[map_fi.A[:, i], 0] * ax_dist_activation.mean(), "--", color='b')
+        plt.plot(ax_dist_activation, color='k')
+        plt.show()
+
+        # Ask if we should tke it ?
+        takeit = input("Take the input ?: ")
+
+        if takeit == 'yes':
+            sax_I[map_fi.A[:, i], 0] = (ax_dist_activation > 1e-2).astype(int)
+            level += 1
+
+    return sax_I, level
 
 
 def show_diff_fg(fga, fgb, map_fi):

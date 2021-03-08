@@ -16,7 +16,7 @@ from scipy.sparse import spmatrix
 # Local import
 from src.mlops.names import KVName
 from src.mlops.features import FoldManager
-from src.model.yala import Yala
+from src.model.yala2 import Yala
 
 logging.getLogger().setLevel(logging.INFO)
 
