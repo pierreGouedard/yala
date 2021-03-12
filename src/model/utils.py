@@ -3,12 +3,6 @@ import numpy as np
 from scipy.sparse import csc_matrix, diags
 
 # Local import
-from .patterns import YalaDrainingPatterns
-
-
-def build_draining_firing_graph(sampler, drainer_params, pattern=None):
-    sax_inputs = sampler.sample(pattern).sax_inputs.dot(diags(drainer_params.weights, dtype=float))
-    return YalaDrainingPatterns.from_input_matrix(sax_inputs, drainer_params, sampler.n_label, base_patterns=pattern)
 
 
 def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):

@@ -50,7 +50,7 @@ params_folds = {
 
 params_yala = {
     'sampling_rate': 1, 'max_iter': 200, 'min_gain': 1e-3, 'draining_size': 200000,
-    'batch_size': 100000, 'min_firing': 250, 'min_precision': 0.85, 'max_retry': 5,
+    'batch_size': 100000, 'min_firing': 100, 'min_precision': 0.85, 'max_retry': 5,
     'dropout_rate_mask': 0, 'n_overlap': 100
 }
 
@@ -61,6 +61,8 @@ params_encoding = {
     'args': ['mapping_feature_input']
 }
 np.random.seed(234)
+from random import seed
+seed(123)
 
 # Defined custom output name based on parameters of the script
 name_mdl = '{}'.format(KVName.from_dict(parameters).to_string())

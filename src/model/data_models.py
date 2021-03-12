@@ -1,49 +1,87 @@
 """All classes that specify data structures."""
+# Global import
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from typing import Optional
-from numpy import array
-from scipy.sparse import spmatrix
+from numpy import array, empty, hstack
+from scipy.sparse import spmatrix, csc_matrix, hstack as sphstack
+
+# Local import
 
 
 @dataclass
-class TransientComponents:
-    feature_precision: spmatrix
-    feature_count: spmatrix
+class AmplificationComponents:
     inputs: spmatrix
+    partitions: List[Dict[str, Any]]
+    bit_inner: spmatrix
+    vertex_norm: array
 
     def __len__(self):
-        return self.inputs.shape[1]
-
-
-@dataclass
-class BaseComponents:
-    inputs: Optional[spmatrix]
-    levels: Optional[array]
-    precisions: array
-    counts: array
-
-    def __len__(self):
-        return self.inputs.shape[1]
-
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self.precisions[i], self.counts[i]
+        return self.vertex_norm.shape[0]
 
     def __getitem__(self, i):
-        assert isinstance(i, int), 'indice should be an integer'
-        return BaseComponents(
-            inputs=self.inputs[:, i], levels=self.levels[[i]], precisions=self.precisions[[i]], counts=self.counts[[i]]
+        assert isinstance(i, int), 'index should be an integer'
+        return AmplificationComponents(
+            inputs=self.inputs[:, i], partitions=[self.partitions[i]], bit_inner=self.bit_inner[[2 * i, 2 * i + 1], :],
+            vertex_norm=self.vertex_norm[[i]]
         )
 
-    def reduce(self, idx):
-        self.inputs, self.levels = self.inputs[:, idx], self.levels[idx]
-        self.precisions, self.counts = self.precisions[idx], self.counts[idx]
+    def pop(self, ind):
+
+        tmp = self[ind]
+
+        # Get indices to keep
+        l_idx = range(len(self))
+
+        # Update data
+        self.inputs = self.inputs[:, [i for i in l_idx if i != ind]]
+        self.partitions = [self.partitions[i] for i in l_idx if i != ind]
+        self.bit_inner = self.bit_inner[[i for i in range(2 * len(self)) if i not in {2 * ind, 2 * ind + 1}], :]
+        self.vertex_norm = self.vertex_norm[[i for i in l_idx if i != ind]]
+
+        return tmp
 
 
 @dataclass
-class ExtractedDrainedComponents:
-    base_components: Optional[BaseComponents]
-    transient_components: Optional[TransientComponents]
+class FgComponents:
+    inputs: spmatrix
+    partitions: List[Dict[str, Any]]
+    levels: array
+
+    @staticmethod
+    def empty_comp():
+        return FgComponents(csc_matrix((0, 0)), [], empty((0,)))
+
+    def __len__(self):
+        return self.levels.shape[0]
+
+    def __getitem__(self, i):
+        assert isinstance(i, int), 'index should be an integer'
+        return FgComponents(
+            inputs=self.inputs[:, i], partitions=[self.partitions[i]], levels=self.levels[[i]]
+        )
+
+    def __add__(self, other):
+        if self.inputs.shape[1] == 0:
+            sax_inputs = other.inputs
+        else:
+            sax_inputs = sphstack([self.inputs, other.inputs])
+
+        return FgComponents(
+            inputs=sax_inputs, partitions=self.partitions + other.partitions, levels=hstack([self.levels, other.levels])
+        )
+
+    def pop(self, ind):
+
+        tmp = self[ind]
+
+        # Get indices to keep
+        l_idx = set(range(len(self))).difference({ind})
+
+        # Update data
+        self.partitions = [self.partitions[i] for i in l_idx]
+        self.inputs, self.levels = self.inputs[:, l_idx], self.levels[l_idx]
+
+        return tmp
 
 
 @dataclass

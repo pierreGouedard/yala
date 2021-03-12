@@ -1,5 +1,5 @@
 # Global imports
-from scipy.sparse import csc_matrix, vstack
+from scipy.sparse import csc_matrix, vstack, diags
 from numpy.random import binomial
 from firing_graph.tools.helpers.servers import ArrayServer
 from numpy import array
@@ -43,6 +43,14 @@ class YalaUnclassifiedServer(ArrayServer):
             self.sax_mask_forward = sax_parallel_mask
 
         return self
+
+    def next_masked_forward(self, n=1, update_step=True):
+        self.next_forward(n, update_step)
+
+        if self.sax_mask_forward.nnz > 0:
+            return diags(~(self.sax_mask_forward.A[:, 0] > 0), dtype=bool).dot(self.sax_data_forward)
+
+        return self.sax_data_forward
 
     def get_init_precision(self, **kwargs):
         return super().get_init_precision(self.parallel_mask)

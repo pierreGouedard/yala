@@ -5,13 +5,33 @@ from scipy.sparse import lil_matrix, csc_matrix
 from dataclasses import asdict
 
 # Local import
-from .utils import build_draining_firing_graph, set_feedbacks
-from src.model.helpers.picker import YalaGreedyPicker, YalaOrthogonalPicker
-from src.model.helpers.sampler import YalaSampler
+from src.model.patterns import YalaBasePatterns
 from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedServer
 from .data_models import DrainerFeedbacks, DrainerParameters
 from src.model.helpers.amplifier import Amplifier
 from src.model.utils2 import prepare_draining_graph, prepare_amplifier_graph
+from src.model.data_models import FgComponents
+
+
+# TODO: implement almost production level code of the new routine
+#   * Vectorize as much as possible
+#   * Based on amplifier and Drainer => limit as much as possible the utils function
+#   * May be at some point, externalize the amplifier, as the drainer.
+#   * As previously planned take care of the encoding in here, so that yala can respect scikit-learn interface
+#       and can be added to my (to release) DS platform for personal project based on Kedro / scikit / keras
+#   * Work on Portfolio management project :)
+
+# TODO: Schedule of prod implementation of new paradigm:
+#   * 1. Create amplifier class, generalize and vectorize its operations
+#   * 2. Create util codes that implement necessary operations to go from drain to amplify and amplify to drain
+#   * 3. implement final selection of vertices:
+#       3.A. Remove duplicated factors
+#       3.B. Create reducer (mean, regul mean, logistic reg)
+
+# TODO: Post usability implementation:
+#  Make a true fucking grid search, get perf. The continuation of this project doesn't depends on the performace
+#  found on the kaggle dataset. Just continue making it a prod level algo and avoid making change to the current
+#  algorithm. That is: Take care of encoding and unit test and epuration of the code (mypy, flake8, Black)
 
 
 class Yala(object):
@@ -50,12 +70,9 @@ class Yala(object):
         self.dropout_rate_mask = dropout_rate_mask
 
         # Picker params
-        self.picker_type = picker_type
-        self.picker_params = dict(
-            min_gain=min_gain, min_precision=min_precision, min_firing=min_firing, margin=margin,
-            max_precision=1 - (2 * min_gain) if max_precision is None else max_precision,
-        )
-        self.n_overlap = n_overlap
+        self.min_gain = min_gain
+        self.max_precision = 1 - (2 * min_gain)
+        self.min_firing = min_firing
 
         # Drainer params
         self.drainer_params = DrainerParameters(feedbacks=None, weights=None)
@@ -94,39 +111,28 @@ class Yala(object):
         else:
             raise NotImplementedError
 
-        # TODO: implement almost production level code of the new routine
-        #   * Vectorize as much as possible
-        #   * Based on amplifier and Drainer => limit as much as possible the utils function
-        #   * May be at some point, externalize the amplifier, as the drainer.
-        #   * As previously planned take care of the encoding in here, so that yala can respect scikit-learn interface
-        #       and can be added to my (to release) DS platform for personal project based on Kedro / scikit / keras
-        #   * Work on Portfolio management project :)
+        amplifier_search = Amplifier(
+            self.server, mapping_feature_input, self.draining_size + 50000, min_size=self.min_firing,
+            max_precision=self.max_precision
+        )
 
-        # TODO: Schedule of prod implementation of new paradigm:
-        #   * 1. Create amplifier class, generalize and vectorize its operations
-        #   * 2. Create util codes that implement necessary operations to go from drain to amplify and amplify to drain
-        #   * 3. implement final selection of vertices:
-        #       3.A. Remove duplicated factors
-        #       3.B. Create reducer (mean, regul mean, logistic reg)
-
-        # TODO: Post usability implementation:
-        #  Make a true fucking grid search, get perf. The continuation of this project doesn't depends on the performace
-        #  found on the kaggle dataset. Just continue making it a prod level algo and avoid making change to the current
-        #  algorithm. That is: Take care of encoding and unit test and epuration of the code (mypy, flake8, Black)
-
-        init_level, init_partition = 5, [{'indices': 0, 'output_id': 0, 'label': 0, 'precision': 0}]
-        amplifier = Amplifier(self.server, mapping_feature_input, self.draining_size, debug={"indice": 0})
+        amplifier_refinement = Amplifier(
+            self.server, mapping_feature_input, self.draining_size + 50000, min_size=self.min_firing,
+            max_precision=self.max_precision, ci_select=0.5, gap_fill=True, select_thresh=0.8
+        )
 
         for i in range(self.max_iter):
             print("[YALA]: Iteration {}".format(i))
 
             # Initial sampling
-            partials = amplifier.sample_and_amplify()
+            partials, completes = amplifier.sample_and_amplify()
 
             stop = False
             while not stop:
                 # Prepare draining
-                fg, drainer_args = prepare_draining_graph(partials)
+                fg, drainer_args = prepare_draining_graph(
+                    partials, self.server, self.draining_size, self.min_gain, self.min_firing
+                )
 
                 # Drain firing graph
                 drained = FiringGraphDrainer(fg, self.server, self.batch_size, **asdict(drainer_args.feedbacks)) \
@@ -134,87 +140,43 @@ class Yala(object):
                     .firing_graph
 
                 # Amplify firing graph
-                partials, completes = amplifier.amplify(self.server, prepare_amplifier_graph(drained))
+                fg, l_pairs = prepare_amplifier_graph(drained)
+                partials, completes = amplifier_search.amplify(fg, completes, l_pairs)
 
                 # Update stop criteria
                 stop = partials is None
+
+            # Refinement
+
+            import IPython
+            IPython.embed()
+
+            fg, stop, refined = YalaBasePatterns.from_fg_comp(completes), False, FgComponents.empty_comp()
+            while not stop:
+                partials, _ = amplifier_refinement.amplify(fg, FgComponents.empty_comp())
+
+                # Remove completes that are completely refined
+                for i in range(len(partials))
+                    if criterion:
+                        refined += partials.pop(i)
+                fg_new = YalaBasePatterns.from_fg_comp(partials)
+
+            # DEBUG
+            fg = YalaBasePatterns.from_fg_comp(completes)
+            n = fg.n_vertex
+            l_pairs = [[i, (i + 1) % n] for i in range(n)]
+            amplifier.debug = {"indices": [0]}
+            fg.levels -= 1
+            amplifier.amplify(fg, FgComponents.empty_comp(), l_pairs)
 
             # TODO: Final refinement of completes. (what we previously refered as final bit selection
             #   Fuck the algo is so smooth now !
-            #### END
-
-        # Core loop
-        import time
-        start = time.time()
-        count_no_update, l_dropouts = 0, []
-        for i in range(self.max_iter):
-            print("[YALA]: Iteration {}".format(i))
-
-            # infer init params from signal and build initial graph
-            print(self.server.get_init_precision())
-            self.drainer_params = self.init_parameters(self.server.get_init_precision())
-            firing_graph = build_draining_firing_graph(self.sampler, self.drainer_params)
-            stop = False
-            while not stop:
-                # Drain firing graph
-                firing_graph = FiringGraphDrainer(
-                    firing_graph, self.server, self.batch_size, **asdict(self.drainer_params.feedbacks)
-                )\
-                    .drain_all(n_max=self.draining_size)\
-                    .firing_graph
-
-                # Pick partial patterns
-                partials, self.drainer_params = self.picker.pick_patterns_multi_label(self.server, firing_graph)
-
-                # Update stop criteria
-                stop = partials is None
-                if not stop:
-                    firing_graph = build_draining_firing_graph(self.sampler, self.drainer_params, partials)
-
-            # Augment current firing graph
-
-            #### TEST
-            level = self.picker.completes.I[:, 0].T.dot(mapping_feature_input).sum()
-            fg = get_drainer_firing_graph(self.picker.completes.matrices['Iw'][:, 0], level, mapping_feature_input)
-            fg = get_amplifier_firing_graph(self.picker.completes.matrices['Iw'][:, 0], level)
-            import matplotlib.pyplot as plt
-            import IPython
-            IPython.embed()
-            sax_I, level = reselect_graph(fg, mapping_feature_input, X)
-
-            # Show inputs
-            for i in range(mapping_feature_input.shape[1]):
-                ax_in = fg.I.A[mapping_feature_input.A[:, i], 0]
-                plt.plot(ax_in)
-                plt.title(f'input feature {i}')
-                plt.show()
-
-            show_draining_stats(fg, mapping_feature_input, X, y)
-            #### END TEST
-
-            if self.firing_graph is not None:
-                self.firing_graph = self.firing_graph.augment_from_pattern(
-                    self.picker.completes, 'same', **{'group_id': i}
-                )
-
-            else:
-                self.firing_graph = self.picker.completes.copy() if self.picker.completes is not None else None
-
-            # Escape main loop on last retry condition
-            if self.picker.completes is None:
-                count_no_update += 1
-                if count_no_update > self.max_retry:
-                    break
-            else:
-                count_no_update = 0
 
             # Update sampler attributes
-            self.server.update_mask_with_pattern(self.picker.completes)
-            self.picker.completes = None
+            self.server.update_mask_with_pattern()
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
 
-        print('duration of algorithm: {}s'.format(time.time() - start))
         return self
 
     def predict_proba_new(self, X, n_label):
