@@ -1,59 +1,75 @@
-# Global imports
-import numpy as np
-from scipy.sparse import csc_matrix, diags
+# Global import
+from scipy.sparse import hstack
 
 # Local import
+from src.model.patterns import YalaBasePatterns, YalaTopPattern
+from .utils import set_feedbacks
+from .data_models import DrainerFeedbacks, DrainerParameters, FgComponents
 
 
-def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
+def prepare_draining_graph(fg_comp, server, n_sample_precision, min_gain, min_firing):
 
-    # If no candidate for norm return empty list
-    if not ax_new_mask.any():
-        return []
+    # TODO: does not support multi label in its current state
 
-    # If only one candidate for norm return un-changed precision
-    if sax_activations.shape[-1] == 1:
-        return ax_precision
+    # Build firing graph used for draining
+    firing_graph = YalaBasePatterns.from_fg_comp(fg_comp)
+    firing_graph.matrices['Im'] = firing_graph.I
 
-    # Build diff operator
-    n = sax_activations.shape[-1] - 1
-    sax_diff = diags(-1 * np.ones(n), offsets=1) + diags(np.ones(n + 1))
+    # Get masked activations
+    sax_x = server.next_masked_forward(n=n_sample_precision, update_step=False)
+    sax_y = server.next_backward(n=n_sample_precision, update_step=False).sax_data_backward
 
-    # Distribute activation
-    sax_activations_sub = sax_activations.dot(diags(ax_new_mask, dtype=bool))
-    sax_activation_cs = csc_matrix(sax_activations.toarray().cumsum(axis=1))
-    sax_dist = sax_activations_sub.astype(int).transpose().dot(sax_activation_cs > 0).dot(sax_diff)
+    # Compute mean precision of each vertex and compute precision
+    sax_x = firing_graph.propagate(sax_x)
+    ax_precisions = (sax_y.T.astype(int).dot(sax_x) / (sax_x.sum(axis=0) + 1e-6)).A[0]
 
-    # Compute standardized precision
-    ax_p = sax_dist[ax_new_mask, :].toarray().sum(axis=1) * ax_precision[ax_new_mask]
-    ax_p -= (sax_dist[ax_new_mask, :].toarray() * ax_precision).sum(axis=1)
-    ax_p += (sax_dist.diagonal()[ax_new_mask] * ax_precision[ax_new_mask])
-    ax_p /= sax_dist.diagonal()[ax_new_mask]
+    # Set drainer params and weight of firing graph
+    drainer_params = init_parameters(ax_precisions, min_gain, min_firing)
+    firing_graph.matrices['Iw'] = firing_graph.I * drainer_params.weights[0]
 
-    return ax_p
+    # Update backward pattern (1 label only)
+    server.pattern_backward = YalaTopPattern.from_mapping({0: list(range(firing_graph.n_vertex))})
+    print(f'precisions: {ax_precisions}')
+
+    # Update partitions with freshly computed precision
+    firing_graph.partitions = [{**p, 'precision': ax_precisions[i]} for i, p in enumerate(firing_graph.partitions)]
+
+    return firing_graph, drainer_params
 
 
-def set_feedbacks(ax_phi_old, ax_phi_new, r_max=1000):
+def prepare_amplifier_graph(drained):
+
+    sax_weight, sax_count, n = drained.Iw, drained.backward_firing['i'], drained.n_vertex
+
+    # Get input weights and count
+    sax_left_mask = (sax_weight > 0).multiply((sax_count > 0))
+    sax_right_mask = ((sax_count > 0).astype(int) - sax_left_mask.astype(int) > 0)
+
+    firing_graph = YalaBasePatterns.from_fg_comp(FgComponents(
+        inputs=hstack([sax_left_mask, sax_right_mask])[:, sum([[i, i + n] for i in range(n)], [])],
+        partitions=sum([[p, p] for p in drained.partitions], []),
+        levels=drained.levels[sum([[i, i] for i in range(n)], [])]
+    ))
+
+    l_pairs = [[2 * i, 2 * i + 1] for i in range(n)]
+
+    return firing_graph, l_pairs
+
+
+def init_parameters(ax_precision, min_gain, min_firing):
     """
 
-    :param phi_old:
-    :param phi_new:
-    :param r_max:
+    :param ax_precision:
     :return:
     """
-    ax_p, ax_r = np.zeros(ax_phi_new.shape), np.zeros(ax_phi_new.shape)
-    for i, (phi_old, phi_new) in enumerate(zip(*[ax_phi_old, ax_phi_new])):
-        p, r = set_feedback(phi_old, phi_new, r_max)
-        ax_p[i], ax_r[i] = p, r
+    # Clip upper to max precision and get penalty-reward parameters
+    ax_precision = ax_precision.clip(max=1. - 2 * min_gain)
+    ax_p, ax_r = set_feedbacks(ax_precision + min_gain, ax_precision + (2 * min_gain))
 
-    return ax_p, ax_r
+    # Create drainer params
+    drainer_params = DrainerParameters(
+        feedbacks=DrainerFeedbacks(penalties=ax_p, rewards=ax_r),
+        weights=((ax_p - (ax_precision * (ax_p + ax_r))) * min_firing).astype(int) + 1
+    )
 
-
-def set_feedback(phi_old, phi_new, r_max=1000):
-    for r in range(r_max):
-        p = np.ceil(r * phi_old / (1 - phi_old))
-        score = (phi_new * (p + r)) - p
-        if score > 0.:
-            return p, r
-
-    raise ValueError("Not possible to find feedback values to distinguish {} and {}".format(phi_old, phi_new))
+    return drainer_params
