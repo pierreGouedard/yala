@@ -11,6 +11,7 @@ from scipy.sparse import spmatrix, csc_matrix, hstack as sphstack
 @dataclass
 class AmplificationComponents:
     inputs: spmatrix
+    levels: array
     partitions: List[Dict[str, Any]]
     bit_inner: spmatrix
     vertex_norm: array
@@ -21,8 +22,8 @@ class AmplificationComponents:
     def __getitem__(self, i):
         assert isinstance(i, int), 'index should be an integer'
         return AmplificationComponents(
-            inputs=self.inputs[:, i], partitions=[self.partitions[i]], bit_inner=self.bit_inner[[2 * i, 2 * i + 1], :],
-            vertex_norm=self.vertex_norm[[i]]
+            inputs=self.inputs[:, i], levels=self.levels[[i]], partitions=[self.partitions[i]],
+            bit_inner=self.bit_inner[[2 * i, 2 * i + 1], :], vertex_norm=self.vertex_norm[[i]]
         )
 
     def pop(self, ind):
@@ -34,6 +35,7 @@ class AmplificationComponents:
 
         # Update data
         self.inputs = self.inputs[:, [i for i in l_idx if i != ind]]
+        self.levels = self.levels[[i for i in l_idx if i != ind]]
         self.partitions = [self.partitions[i] for i in l_idx if i != ind]
         self.bit_inner = self.bit_inner[[i for i in range(2 * len(self)) if i not in {2 * ind, 2 * ind + 1}], :]
         self.vertex_norm = self.vertex_norm[[i for i in l_idx if i != ind]]
@@ -75,7 +77,7 @@ class FgComponents:
         tmp = self[ind]
 
         # Get indices to keep
-        l_idx = set(range(len(self))).difference({ind})
+        l_idx = list(set(range(len(self))).difference({ind}))
 
         # Update data
         self.partitions = [self.partitions[i] for i in l_idx]

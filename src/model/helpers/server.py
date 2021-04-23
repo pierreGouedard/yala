@@ -27,8 +27,7 @@ class YalaUnclassifiedServer(ArrayServer):
     def update_mask_with_pattern(self, pattern):
         if pattern is None:
             return
-
-        sax_mask = super().propagate_all(pattern, return_activations=False)
+        sax_mask = super().propagate_all(pattern)
         super().update_mask(sax_mask)
 
     def next_forward(self, n=1, update_step=True):
@@ -36,6 +35,7 @@ class YalaUnclassifiedServer(ArrayServer):
         sax_parallel_mask = vstack([self.parallel_mask[start:end, :].tocsr() for (start, end) in l_positions])
 
         super().next_forward(n, update_step)
+
         # Add to forward mask initial mask
         if self.sax_mask_forward is not None:
             self.sax_mask_forward = (self.sax_mask_forward + sax_parallel_mask > 0).astype(self.dtype_forward)
@@ -79,8 +79,8 @@ class YalaMisclassifiedServer(ArrayServer):
         if pattern is None:
             return
 
-        ax_precisions = array([p['precision'] for p in sorted(pattern.partitions, key=lambda x: x['indices'][0])])
-        sax_mask = super().propagate_all(pattern, ax_values=ax_precisions)
+        ax_p_dropout = array([max(2 * p['precision'] - 1, 2 * (1 - p['precision']) - 1) for p in pattern.partitions])
+        sax_mask = super().propagate_all(pattern, ax_values=ax_p_dropout)
         super().update_mask(sax_mask)
 
     def next_forward(self, n=1, update_step=True):
@@ -95,6 +95,14 @@ class YalaMisclassifiedServer(ArrayServer):
             self.sax_mask_forward = sax_parallel_mask
 
         return self
+
+    def next_masked_forward(self, n=1, update_step=True):
+        self.next_forward(n, update_step)
+
+        if self.sax_mask_forward.nnz > 0:
+            return diags(~(self.sax_mask_forward.A[:, 0] > 0), dtype=bool).dot(self.sax_data_forward)
+
+        return self.sax_data_forward
 
     def get_init_precision(self, **kwargs):
         return super().get_init_precision(self.parallel_mask)

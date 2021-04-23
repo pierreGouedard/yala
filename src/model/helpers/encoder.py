@@ -1,216 +1,130 @@
+# Local import
 import numpy as np
-import pandas as pd
-from scipy.sparse import csc_matrix, hstack, csr_matrix, coo_matrix, lil_matrix
-from sklearn.preprocessing import OneHotEncoder
+from scipy.sparse import csc_matrix, hstack
+
+# Global import
 
 
-class NumEncoder(object):
-    """
-    NumEncoder build a discrete space from continuous numerical 2D arrays and encode numerical values of the array based
-    on this discrete space. The Class implement the  BaseEstimator and TransformerMixin (or _BaseEncoder) interface
-    from scikit-learn
+class Encoder(object):
+    def __init__(self, n_bin, bin_method='uniform', bin_missing=False, min_val_by_bin=10):
 
-    """
-
-
-    def __init__(self, n_bins, method='uniform', encode_missing=True):
-        """
-
-        :param n_bins: Number of discrete values
-        :type n_bins: int
-        :param method: string specifying methods to discretize space spanned by numerical values in X
-        :type method: str
-        :param n_quantile: Number of quantile to take into account for quantile based method
-        :type n_quantile: int
-        :param n_cluster: Number of quantile to take into account for quantile based method
-        :type n_cluster: int
-        :param bounds: Upper and lower bounds of dicrete values.
-        :type bounds: list
-        """
         # Core parameters
-        self.method = method
-        self.n_bins = n_bins
-        self.encode_missing = encode_missing
-        self.total_size = self.n_bins + self.encode_missing
+        self.n_bin, self.bin_method, self.bin_missing = n_bin, bin_method, bin_missing
+        self.min_val_by_bin = min_val_by_bin
+
+        self.total_size = self.n_bin + self.bin_missing
 
         # Set unknown attribute to None
         self.bins = None
 
     def update_total_size(self):
-        self.total_size = self.n_bins + self.encode_missing
+        self.total_size = self.n_bin + self.bin_missing
 
-    def fit_transform(self, X, y=None):
-        """
-        Fit 2D array X and transform its values.
+    def fit(self, x, y=None):
 
-        :param X: 2D array of numerical values
-        :type X: 2D numpy array
-        :param y: Array of target class (not used)
-        :return: Array of encoded numerical values
-        :rtype: 2D numpy array
+        # Get unique values
+        ax_unique = np.unique(x)
 
-        """
-        self.fit(X, y)
-        return self.transform(X)
+        # If not enough unique values, treat it as a cat value and hot encode it
+        if len(ax_unique) < (self.n_bin * self.min_val_by_bin):
+            self.bins = ax_unique
+            self.n_bin = len(ax_unique)
+            self.update_total_size()
 
-    def fit(self, X, y=None):
-        """
-        Build a set of discrete values from numerical value of the 2D array X.
+            return self
 
-        :param X: 2D array of numerical values
-        :type X: 2D numpy array
-        :param y: Array of target class (not used)
-        :return: Current instance of the class
-        :rtype: self
+        # Encode numerical values
+        if self.bin_method == 'uniform':
+            bounds = np.quantile(x[~np.isnan(x)], [0.02, 0.98])
+            self.bins = np.linspace(bounds[0], bounds[1], num=self.n_bin)
 
-        """
-        self.n_bins = min(len(np.unique(X)), self.n_bins)
+        elif self.bin_method == 'quantile':
+            # Get bins from quantiles
+            ax_bins = np.quantile(x[~np.isnan(x)], [i / (self.n_bin + 1) for i in range(1, self.n_bin + 1)])
 
-        if self.method == 'uniform':
-            bounds = np.quantile(X[~np.isnan(X)], [0.05, 0.95])
-            self.bins = np.linspace(bounds[0], bounds[1], num=self.n_bins)
-
-        elif self.method == 'quantile':
-            ax_bins = np.quantile(X[~np.isnan(X)], [i / (self.n_bins + 1) for i in range(1, self.n_bins + 1)])
+            # Get rid of too close bounds
             ax_filter = np.hstack([abs(ax_bins[:-1] - ax_bins[1:]) >= 1e-4, np.array([True])])
             self.bins = ax_bins[ax_filter] + np.random.rand(ax_filter.sum()) * 1e-4
-            self.n_bins = len(self.bins)
+
+            # Update Number of bin
+            self.n_bin = len(self.bins)
+            self.update_total_size()
 
         else:
-            raise NotImplementedError
-
-        self.update_total_size()
+            raise ValueError(f"Unknown bin method {self.bin_method}")
 
         return self
 
     def transform(self, ax_continuous):
+
+        if self.bins is None:
+            raise ValueError('Bins are not set when transform called')
+
         ax_activation = abs(self.bins - ax_continuous)
         ax_activation = ax_activation == ax_activation.min(axis=1, keepdims=True)
 
-        if self.encode_missing:
+        if self.bin_missing:
             ax_activation = np.hstack([ax_activation, ~ax_activation.any(axis=1, keepdims=True)])
 
         return csc_matrix(ax_activation)
 
-    def inverse_transform(self, sax_bits, agg='mean'):
-        raise NotImplementedError
 
-    def discretize_value(self, x):
+class MultiEncoders():
+    _NUMERIC_KINDS = set('buifc')
 
-        if self.bins is None:
-            raise ValueError('First set the bins of discretizer')
-        x_ = min([(v, abs(x - v)) for k, v in self.bins.items()], key=lambda t: t[1])[0]
+    def __init__(self, n_bin, bin_method, bin_missing=False, n_augment=0, basis="norm"):
+        # global parameters
+        self.n_augment = n_augment
+        self.type_basis = basis
+        self.p_encoder = {"n_bin": n_bin, "bin_method": bin_method, "bin_missing": bin_missing}
 
-        return x_
+        # parameters to fit
+        self.basis = None
+        self.bf_map = None
+        self.n_label = None
+        self.encoders = {}
 
-    def discretize_array(self, ax_continuous):
-        # Vectorize discretie value function
-        vdicretizer = np.vectorize(lambda x: self.discretize_value(x))
-
-        # Apply to array
-        ax_discrete = vdicretizer(ax_continuous)
-
-        return ax_discrete
-
-    def arange(self, x_min, x_max):
-        x_min_, x_max_ = self.discretize_value(x_min), self.discretize_value(x_max)
-        return np.array(sorted([v for _, v in self.bins.items() if x_min_ <= v <= x_max_]))
-
-
-class CatEncoder(OneHotEncoder):
-    """
-    CatEncoder build a one hot encoding of categorical feature. The Class inherit from OneHotEncoder class from
-    scikit-learn. It is coded as it just in case we need some extra feature in a close future.
-
-    """
-
-
-class HybridEncoder():
-
-    def __init__(self, cat_cols, num_cols, params_num_enc, params_cat_enc, ):
-        """
-
-        :param cat_cols:
-        :param num_cols:
-        :param params_num_enc:
-        :param params_cat_enc:
-        """
-
-        # Save cat and numerical columns name or indices
-        self.cat_cols = cat_cols
-        self.num_cols = num_cols
-        self.sax_feature_to_input = None
-
-        # Create encoders
-        self.cat_enc = CatEncoder(**params_cat_enc)
-        self.num_encs = {c: NumEncoder(**params_num_enc) for c in num_cols}
-        self.map_encoders = None
-
-    def fit_transform(self, X, y=None):
-        """
-        Fit 2D array X and transform its values.
-
-        :param X: 2D array of numerical values
-        :type X: 2D numpy array
-        :param y: Array of target class (not used)
-        :return: Array of encoded numerical values
-        :rtype: 2D numpy array
-
-        """
+    def fit_transform(self, X, y):
         self.fit(X, y)
-        return self.transform(X)
+        return self.transform(X, y)
 
-    def fit(self, X, y=None):
-        """
-        Build a set of discrete values from numerical value of the 2D array X.
+    def fit(self, X, y):
 
-        :param X: 2D array of numerical values
-        :type X: 2D numpy array
-        :param y: Array of target class (not used)
-        :return: Current instance of the class
-        :rtype: self
+        # Check whether X and y contain only numeric data
+        assert X.dtype.kind in self._NUMERIC_KINDS, "X contains non num data, must contains only num data"
+        assert y.dtype.kind in self._NUMERIC_KINDS, "y contains non num data, must contains only num data"
 
-        """
-        # Fit categorical encoder
-        self.cat_enc.fit(self.get_array_from_input(X, self.cat_cols))
-        n_inputs = sum([len(l_cat) for l_cat in self.cat_enc.categories_])
+        if self.basis is not None:
+            pass
 
-        # Fit numerical encoder
-        for i, c in enumerate(self.num_cols):
-            self.num_encs[c].fit(self.get_array_from_input(X, [c]))
-            n_inputs += self.num_encs[c].total_size
+        ax_bf_map, n_inputs = np.zeros((self.p_encoder['n_bin'] * X.shape[1], X.shape[1]), dtype=bool), 0
+        for i in range(X.shape[1]):
+            self.encoders[i] = Encoder(**self.p_encoder).fit(X[:, i])
+            ax_bf_map[range(n_inputs, n_inputs + self.encoders[i].total_size), i] = True
+            n_inputs += self.encoders[i].total_size
 
-        # Create feature to input mapping
-        ax_feature_to_input, n = np.zeros((n_inputs, len(self.cat_cols) + len(self.num_cols)), dtype=bool), 0
-        for i, l_cats in enumerate(self.cat_enc.categories_):
-            ax_feature_to_input[range(n, n + len(l_cats)), i] = True
-            n += len(l_cats)
+        self.bf_map = csc_matrix(ax_bf_map[:n_inputs, :])
+        self.n_label = len(np.unique(y))
 
-        for i, c in enumerate(self.num_cols):
-            ax_feature_to_input[range(n, n + self.num_encs[c].total_size), i + len(self.cat_cols)] = True
-            n += self.num_encs[c].total_size
-
-        self.sax_feature_to_input = csc_matrix(ax_feature_to_input)
         return self
 
-    def transform(self, X):
-        # Transform categorical features
-        X_encoded = self.cat_enc.transform(self.get_array_from_input(X, self.cat_cols)).tocsc()
+    def transform(self, X, y):
+        assert self.bf_map is not None, "Encoder is not fitted when transform called"
 
-        # transform numerical features
-        l_num_encoded, n = [], X_encoded.shape
-        for c in self.num_cols:
-            l_num_encoded.append(self.num_encs[c].transform(self.get_array_from_input(X, [c])))
-
-        return hstack([X_encoded] + l_num_encoded)
-
-    @staticmethod
-    def get_array_from_input(X, l_indices):
-        if isinstance(X, pd.DataFrame):
-            return X[l_indices].values
-
-        elif isinstance(X, np.ndarray):
-            return X[:, l_indices]
+        # Transform target
+        if self.n_label > 1:
+            y = csc_matrix(([True] * y.shape[0], (range(y.shape[0]), y)), shape=(y.shape[0], self.n_label))
 
         else:
-            raise ValueError('Data type {} not understood'.format(type(X)))
+            y = csc_matrix(y[:, np.newaxis] > 0)
+
+        # Transform features
+        if self.basis is not None:
+            pass
+
+        # Transform inputs
+        l_encoded = []
+        for i in range(X.shape[1]):
+            l_encoded.append(self.encoders[i].transform(X[:, [i]]))
+
+        return hstack(l_encoded), y

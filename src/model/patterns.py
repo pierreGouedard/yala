@@ -48,17 +48,29 @@ class YalaBasePatterns(FiringGraph):
 
         return YalaBasePatterns(d_matrices['Iw'].shape[1], **kwargs)
 
-    def augment_from_pattern(self, pattern, **kwargs):
-        if pattern is None:
+    def augment_from_fg_comp(self, fg_comp):
+        if len(fg_comp) == 0:
             return self
 
-        return self.augment_from_inputs(pattern.I, pattern.partitions, pattern.levels, **kwargs)
-
-    def augment_from_inputs(self, sax_I, l_partitions, ax_levels, **kwargs):
-        l_partitions = self.partitions + [{**p, **kwargs} for p in l_partitions]
         return YalaBasePatterns.from_fg_comp(FgComponents(
-            inputs=hstack([self.I, sax_I]), partitions=l_partitions, levels=np.hstack((self.levels, ax_levels))
+            inputs=hstack([self.I, fg_comp.inputs]), partitions=self.partitions + fg_comp.partitions,
+            levels=np.hstack((self.levels, fg_comp.levels))
         ))
+
+    def reduce_output(self):
+
+        # Get labels
+        l_labels = [p['label_id'] for p in self.partitions]
+
+        # Map vertices to label output
+        sax_reducer = lil_matrix((self.n_vertex, max(l_labels) + 1))
+        sax_reducer[np.arange(self.n_vertex), l_labels] = 1
+        self.matrices['Ow'] = self.matrices['Ow'].dot(sax_reducer)
+
+        # reformat matrices
+        set_matrices_spec(self.matrices, write_mode=False)
+
+        return self
 
     def copy(self):
 
@@ -66,7 +78,6 @@ class YalaBasePatterns(FiringGraph):
         d_struct = {
             'n_vertex': self.n_vertex,
         }
-
         return self.from_dict(d_struct, **{k: v for k, v in d_graph.items()})
 
 
