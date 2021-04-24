@@ -5,7 +5,7 @@ import numpy as np
 import unittest
 
 # Local import
-from src.model.patterns import YalaBasePattern, YalaTransientPattern
+from src.model.helpers.patterns import YalaBasePattern, YalaTransientPattern
 from src.model.utils import get_transient_scores, overlap_test
 
 

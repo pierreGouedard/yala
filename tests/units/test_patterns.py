@@ -7,7 +7,7 @@ import numpy as np
 import unittest
 
 # Local import
-from src.model.patterns import YalaBasePattern, YalaTransientPattern, YalaSingleDrainingPattern
+from src.model.helpers.patterns import YalaBasePattern, YalaTransientPattern, YalaSingleDrainingPattern
 
 
 class TestPattern(unittest.TestCase):

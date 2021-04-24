@@ -1,20 +1,14 @@
 # Global import
 from firing_graph.solver.drainer import FiringGraphDrainer
-import numpy as np
-from scipy.sparse import lil_matrix, csc_matrix
 from dataclasses import asdict
-import matplotlib.pyplot as plt
 
 # Local import
-from src.model.patterns import YalaBasePatterns
+from src.model.helpers.patterns import YalaBasePatterns
 from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedServer
-from .data_models import DrainerFeedbacks, DrainerParameters
-from src.model.helpers.amplifiers.drain import DrainAmplifier
-from src.model.helpers.amplifiers.refine import RefineAmplifier
+from src.model.helpers.data_models import DrainerParameters
 from src.model.utils import init_sample, prepare_refinement, prepare_expansion
-from src.model.data_models import FgComponents
 from src.model.helpers.encoder import MultiEncoders
-
+from src.model.helpers.operations import Refiner
 
 # TODO: Schedule of prod implementation of new paradigm:
 #   * 3. implement final selection of vertices:
@@ -59,16 +53,13 @@ class Yala(object):
         # Server params
         self.server_type = server_type
         self.dropout_rate_mask = dropout_rate_mask
+        self.server = None
 
         # Drainer params
-        self.drainer_params = DrainerParameters(feedbacks=None, weights=None)
-        self.draining_size = draining_size
-        self.batch_size = batch_size
-        self.draining_margin = draining_margin
+        self.drainer_params = DrainerParameters(total_size=draining_size, batch_size=batch_size, margin=draining_margin)
 
         # Yala Core attributes
         self.firing_graph = None
-        self.server, self.drainer = None, None
 
         # TODO: test / temp
         self.d_merger = {}
@@ -104,32 +95,29 @@ class Yala(object):
         #       1. Refine: Refine sampled features and undiscovered one (add n_update)
         #       2. Expand: Expand sampled feature
 
+        refiner = Refiner(
+            self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing, n_update=self.n_update
+        )
+
         for i in range(self.max_iter):
             print("[YALA]: Iteration {}".format(i))
 
             # Initial sampling
-            components = init_sample(self.n_node_by_iter, self.server, self.level_0, self.encoder.bf_map)
+            component = init_sample(
+                self.n_node_by_iter, self.server, self.level_0, self.encoder.bf_map, window_length=3
+            )
 
             # Core loop
             while True:
 
                 # Refine
-                fg, drainer_args = prepare_refinement(
-                    partials, self.server, self.draining_size, 0.01, self.min_firing
-                )
-
-                drained = FiringGraphDrainer(fg, self.server, self.batch_size, **asdict(drainer_args.feedbacks)) \
-                    .drain_all(n_max=self.draining_size) \
-                    .firing_graph
+                component = refiner.prepare(component).drain_all().select()
+                refiner.reset()
 
                 # Expand
                 fg, drainer_args = prepare_expansion(
                     partials, self.server, self.draining_size, 0.01, self.min_firing
                 )
-
-                drained = FiringGraphDrainer(fg, self.server, self.batch_size, **asdict(drainer_args.feedbacks)) \
-                    .drain_all(n_max=self.draining_size) \
-                    .firing_graph
 
                 # RE start from component and check stop criterion
                 components, completes = None, None

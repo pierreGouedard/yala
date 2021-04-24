@@ -1,11 +1,11 @@
 # Global imports
 import numpy as np
-from scipy.sparse import lil_matrix, hstack, eye, diags
+from scipy.sparse import lil_matrix, hstack, eye
 
 # Local import
 from firing_graph.data_structure.graph import FiringGraph
 from firing_graph.data_structure.utils import create_empty_matrices, set_matrices_spec
-from src.model.data_models import AmplificationComponents, FgComponents
+from src.model.helpers.data_models import FgComponents
 
 
 class YalaBasePatterns(FiringGraph):
@@ -40,7 +40,7 @@ class YalaBasePatterns(FiringGraph):
         )
 
         # Set matrices
-        d_matrices['Iw'] = fg_comp.inputs
+        d_matrices['Iw'] = fg_comp.inputs.copy()
         d_matrices['Ow'] += eye(fg_comp.inputs.shape[1], format='csc', dtype=int)
 
         # Add firing graph kwargs
