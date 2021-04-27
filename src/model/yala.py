@@ -6,7 +6,7 @@ from dataclasses import asdict
 from src.model.helpers.patterns import YalaBasePatterns
 from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedServer
 from src.model.helpers.data_models import DrainerParameters
-from src.model.utils import init_sample, prepare_refinement, prepare_expansion
+from src.model.utils import init_sample
 from src.model.helpers.encoder import MultiEncoders
 from src.model.helpers.operations import Refiner
 
@@ -32,7 +32,7 @@ class Yala(object):
                  n_update=2,
                  dropout_rate_mask=0.2,
                  min_firing=10,
-                 server_type='misclassified',
+                 server_type='unclassified',
                  n_bin=10,
                  bin_method='quantile',
                  bin_missing=False,
@@ -56,7 +56,9 @@ class Yala(object):
         self.server = None
 
         # Drainer params
-        self.drainer_params = DrainerParameters(total_size=draining_size, batch_size=batch_size, margin=draining_margin)
+        self.drainer_params = DrainerParameters(
+            total_size=draining_size, batch_size=batch_size, margin=draining_margin
+        )
 
         # Yala Core attributes
         self.firing_graph = None
@@ -80,11 +82,11 @@ class Yala(object):
         # Instantiate core components
         if self.server_type == 'unclassified':
             self.server = YalaUnclassifiedServer(
-                1, 0, X_enc, y_enc[:, 1], **dict(dropout_rate_mask=self.dropout_rate_mask)
+                X_enc, y_enc[:, 1], **dict(dropout_rate_mask=self.dropout_rate_mask)
             ).stream_features()
         elif self.server_type == 'misclassified':
             self.server = YalaMisclassifiedServer(
-                1, 0, X_enc, y_enc[:, 1], **dict(dropout_rate_mask=self.dropout_rate_mask)
+                X_enc, y_enc[:, 1], **dict(dropout_rate_mask=self.dropout_rate_mask)
             ).stream_features()
         else:
             raise NotImplementedError
@@ -94,6 +96,13 @@ class Yala(object):
         #   Core:
         #       1. Refine: Refine sampled features and undiscovered one (add n_update)
         #       2. Expand: Expand sampled feature
+
+        # TODO: Given the new server, each time a global mask is applied, we should update the draining and batch size
+        #   There is still to implement the forward pattern mask => assume that draining will always operate on a
+        #   depth 1 pattern (this does not limit a firing graph to be much deeper, it just mean it for the draining prcess)
+        #   in other word there is no "deep draining" allowed here (may be once implement 1 just to see)
+        import IPython
+        IPython.embed()
 
         refiner = Refiner(
             self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing, n_update=self.n_update

@@ -61,5 +61,5 @@ class DrainerParameters:
     total_size: int
     batch_size: int
     margin: float
-    feedbacks: Optional[DrainerFeedbacks]
-    weights: Optional[array]
+    feedbacks: Optional[DrainerFeedbacks] = None
+    weights: Optional[array] = None

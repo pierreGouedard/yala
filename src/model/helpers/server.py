@@ -1,8 +1,10 @@
 # Global imports
-from scipy.sparse import csc_matrix, vstack, diags
+from numpy import array
+from numpy import vectorize
 from numpy.random import binomial
 from firing_graph.tools.helpers.servers import ArrayServer
-from numpy import array
+
+
 # Local import
 
 
@@ -12,26 +14,35 @@ class YalaUnclassifiedServer(ArrayServer):
             **dict(sax_forward=sax_forward, sax_backward=sax_backward, mask_method="count", **kwargs)
         )
 
-    def update_mask_with_pattern(self, pattern):
-        if pattern is None:
-            return
-        sax_mask = super().propagate_all(pattern)
-        super().update_mask(sax_mask)
-
     def next_forward(self, n=1, update_step=True):
         super().next_forward(n, update_step)
         return self
 
-    def next_masked_forward(self, n=1, update_step=True):
-        self.next_forward(n, update_step)
+    def apply_mask_method(self, ax_mask):
+        if self.dropout_rate_mask > 0:
+            dropout_func = vectorize(lambda x: binomial(int(x), 1 - self.dropout_rate_mask) < 0 if x > 0 else True)
+            ax_mask = dropout_func(ax_mask)
+        else:
+            ax_mask = ax_mask <= 0
 
-        if self.sax_mask_forward.nnz > 0:
-            return diags(~(self.sax_mask_forward.A[:, 0] > 0), dtype=bool).dot(self.sax_data_forward)
+        return ax_mask
 
-        return self.sax_data_forward
+    def update_param_mask_with_pattern(self, pattern):
+        if pattern is None:
+            return
 
-    def get_init_precision(self, **kwargs):
-        return super().get_init_precision()
+        ax_mask = super().propagate_all(pattern).A[:, 0]
+        self.update_param_mask(ax_mask)
+
+    def update_param_mask(self, ax_param_mask, update_mask=True):
+        if self.ax_param_mask is not None:
+            self.ax_param_mask += ax_param_mask
+
+        else:
+            self.ax_param_mask = ax_param_mask
+
+        if update_mask:
+            super().update_mask()
 
 
 class YalaMisclassifiedServer(ArrayServer):
@@ -41,25 +52,34 @@ class YalaMisclassifiedServer(ArrayServer):
             **dict(sax_forward=sax_forward, sax_backward=sax_backward, mask_method='proba', **kwargs)
         )
 
-    def update_mask_with_pattern(self, pattern):
-        if pattern is None:
-            return
-
-        ax_p_dropout = array([max(2 * p['precision'] - 1, 2 * (1 - p['precision']) - 1) for p in pattern.partitions])
-        sax_mask = super().propagate_all(pattern, ax_values=ax_p_dropout)
-        super().update_mask(sax_mask)
-
     def next_forward(self, n=1, update_step=True):
         super().next_forward(n, update_step)
         return self
 
-    def next_masked_forward(self, n=1, update_step=True):
-        self.next_forward(n, update_step)
+    def apply_mask_method(self, ax_mask):
 
-        if self.sax_mask_forward.nnz > 0:
-            return diags(~(self.sax_mask_forward.A[:, 0] > 0), dtype=bool).dot(self.sax_data_forward)
+        dropout_func = vectorize(lambda x: binomial(1, max(0, min(x, 1))) == 0)
+        ax_mask = dropout_func(ax_mask)
 
-        return self.sax_data_forward
+        return ax_mask.astype(bool)
 
-    def get_init_precision(self, **kwargs):
-        return super().get_init_precision()
+    def update_param_mask_with_pattern(self, pattern):
+        if pattern is None:
+            return
+
+        ax_p_dropout = array([max(2 * p['precision'] - 1, 2 * (1 - p['precision']) - 1) for p in pattern.partitions])
+        ax_mask = super().propagate_all(pattern, ax_values=ax_p_dropout).A[:, 0]
+        self.update_param_mask(ax_mask)
+
+    def update_param_mask(self, ax_param_mask, update_mask=True):
+        if self.ax_param_mask is not None:
+            self.ax_param_mask[self.ax_param_mask < ax_param_mask] = (
+                    self.ax_param_mask[self.ax_param_mask < ax_param_mask] * 0.8 +
+                    ax_param_mask[self.ax_param_mask < ax_param_mask] * 0.2
+            )
+
+        else:
+            self.ax_param_mask = ax_param_mask
+
+        if update_mask:
+            super().update_mask()
