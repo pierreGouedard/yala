@@ -43,10 +43,6 @@ class Refiner(FiringGraphDrainer):
         # Update top and backward pattern of server
         gr = groupby([(p['label_id'], i) for i, p in enumerate(self.firing_graph.partitions)], key=lambda t: t[0])
         self.server.pattern_backward = YalaTopPattern.from_mapping({k: list(map(lambda x: x[1], v)) for k, v in gr})
-
-        # TODO: introduce a mask_backward in addition to the mask_forward:
-        #   mask forward is a global mask applied on all vertices (dealt at input -> why is it not dealt really at input level (like 0 for all))
-        #   mask backward is a vertex specific mask that needs to be handle at output computations.
         self.server.pattern_top = self.top_pattern
 
         # Drain
