@@ -10,7 +10,7 @@ from src.model.yala import Yala
 
 
 class TestYala(unittest.TestCase):
-    show_dataset = True
+    show_dataset = False
     p_yala = {
         'draining_margin': 0.1, 'n_node_by_iter': 2, 'level_0': 5, 'n_update': 2, 'draining_size': 200000,
         'batch_size': 100000, 'min_firing': 100, 'dropout_rate_mask': 0.99, 'max_iter': 100, 'n_bin': 10,
@@ -37,7 +37,10 @@ class TestYala(unittest.TestCase):
         if self.show_dataset:
             self.plot_dataset(self.origin_features, self.target_circle_hard)
 
-        # Encode Augmented database and run yala
+        # Instantiate visualizer
+        self.perf_plotter = PerfPlotter(
+            self.origin_features, self.target_circle_hard, list(range(len(self.target_circle_hard)))
+        )
 
     @staticmethod
     def plot_dataset(ax_x, ax_y):
@@ -51,6 +54,29 @@ class TestYala(unittest.TestCase):
 
         """
         model = Yala(**self.p_yala)
-        model.fit(
-            self.augmented_features, self.target_circle_hard, **{"original_space": self.origin_features}
-        )
+        model.fit(self.augmented_features, self.target_circle_hard, **{"perf_plotter": self.perf_plotter})
+
+
+class PerfPlotter:
+
+    def __init__(self, ax_x, ax_y, indices):
+        self.x = ax_x
+        self.y = ax_y
+        self.indices = indices
+
+    def __call__(self, ax_yhat):
+
+        for i in range(ax_yhat.shape[1]):
+            fig, (ax_got, ax_hat) = plt.subplots(1, 2)
+            fig.suptitle(f'Viz GOT vs Preds #{i}')
+
+            ax_got.scatter(self.x[self.y > 0, 0], self.x[self.y > 0, 1], c='r', marker='+')
+            ax_got.scatter(self.x[self.y == 0, 0], self.x[self.y == 0, 1], c='b', marker='o')
+
+            ax_hat.scatter(self.x[ax_yhat[:, i] > 0, 0], self.x[ax_yhat[:, i] > 0, 1], c='r', marker='+')
+            ax_hat.scatter(self.x[ax_yhat[:, i] == 0, 0], self.x[ax_yhat[:, i] == 0, 1], c='b', marker='o')
+
+            plt.show()
+
+
+

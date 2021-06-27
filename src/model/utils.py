@@ -31,9 +31,9 @@ def init_sample(n, server, l0, sax_bf_map, window_length):
 
 def init_parameters(ax_precision, margin, min_firing):
 
-    ax_precision = ax_precision.clip(max=1.)
+    ax_precision = ax_precision.clip(max=1., min=margin + 0.01)
     ax_p, ax_r = set_feedbacks(ax_precision - margin, ax_precision)
-    ax_weights = ((ax_p - (ax_precision * (ax_p + ax_r))) * min_firing).astype(int) + 1
+    ax_weights = ((ax_p - ((ax_precision - margin) * (ax_p + ax_r))) * min_firing).astype(int) + 1
 
     return DrainerFeedbacks(penalties=ax_p, rewards=ax_r), ax_weights
 

@@ -101,11 +101,10 @@ class Yala(object):
         #   There is still to implement the forward pattern mask => assume that draining will always operate on a
         #   depth 1 pattern (this does not limit a firing graph to be much deeper, it just mean it for the draining prcess)
         #   in other word there is no "deep draining" allowed here (may be once implement 1 just to see)
-        import IPython
-        IPython.embed()
 
         refiner = Refiner(
-            self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing, n_update=self.n_update
+            self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing, n_update=self.n_update,
+            perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True
         )
 
         for i in range(self.max_iter):
@@ -115,7 +114,6 @@ class Yala(object):
             component = init_sample(
                 self.n_node_by_iter, self.server, self.level_0, self.encoder.bf_map, window_length=3
             )
-
             # Core loop
             while True:
 

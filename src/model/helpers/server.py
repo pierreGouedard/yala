@@ -27,12 +27,12 @@ class YalaUnclassifiedServer(ArrayServer):
 
         return ax_mask
 
-    def update_param_mask_with_pattern(self, pattern):
+    def update_param_mask_with_pattern(self, pattern, update_mask=True):
         if pattern is None:
             return
 
         ax_mask = super().propagate_all(pattern).A[:, 0]
-        self.update_param_mask(ax_mask)
+        self.update_param_mask(ax_mask, update_mask)
 
     def update_param_mask(self, ax_param_mask, update_mask=True):
         if self.ax_param_mask is not None:
