@@ -70,12 +70,12 @@ class Refiner(FiringGraphDrainer):
             self.visualize_fg(self.fg_mask)
 
         # Drain
-        import IPython
-        IPython.embed()
         super().drain_all(n_max=self.drainer_params.total_size)
 
         # Reset top pattern of server
         self.server.pattern_backward = None
+
+        return self
 
     def select(self):
         # For each drained vertex, choose which bounds / features shall be chosen to get to the next step
@@ -83,6 +83,10 @@ class Refiner(FiringGraphDrainer):
 
         # FOR TEST: viz after
         fg_selected = None
+        import IPython
+        IPython.embed()
+        # Get f_inputs that were already sampled
+        ax_mask_features =
         self.visualize_fg(fg_selected)
 
         pass
