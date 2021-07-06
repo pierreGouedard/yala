@@ -2,7 +2,6 @@
 import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
 import numpy as np
-from scipy.sparse import csc_matrix
 import unittest
 
 # Local import

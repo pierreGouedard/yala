@@ -4,11 +4,11 @@ from dataclasses import asdict
 from itertools import groupby
 from firing_graph.solver.drainer import FiringGraphDrainer
 from scipy.sparse import diags, csc_matrix
-from matplotlib import pyplot as plt
 
 # Local import
 from src.model.utils import init_parameters
 from src.model.helpers.patterns import YalaBasePatterns, YalaTopPattern
+from src.model.helpers.data_models import FgComponents
 
 
 class Refiner(FiringGraphDrainer):
@@ -77,19 +77,53 @@ class Refiner(FiringGraphDrainer):
 
         return self
 
-    def select(self):
-        # For each drained vertex, choose which bounds / features shall be chosen to get to the next step
-        # TODO
+    def merge_inputs(self, mask_inputs, drained_inputs, count_activations):
 
-        # FOR TEST: viz after
-        fg_selected = None
+        # Get new candidate features and their bits cardinality
+        ax_mask_features = ~mask_inputs.T.dot(self.bf_map).A
+        ax_card_features = self.bf_map.sum(axis=0).A[[0] * ax_mask_features.shape[0], :] * ax_mask_features
+
+        # Get cardinality of each drained feature's bits
+        ax_card_selected = drained_inputs.astype(int).T.dot(self.bf_map).A * ax_mask_features
+
+        # Choose new candidate features (cardinality above 0 and lower than feature cardinality)
+        ax_mask_selected = (ax_card_selected < ax_card_features) * (0 < ax_card_selected)
+        # TODO: add min firing constraint and random selection with self.n_update
+
+        sax_mask_new = self.bf_map.dot(csc_matrix(ax_mask_selected.T))
+
+        # Compute new inputs from refined existing bits and new candidates bits
+        sax_inputs = drained_inputs.multiply(mask_inputs) + drained_inputs.multiply(sax_mask_new)
+
+        return sax_inputs.multiply(count_activations > 0)
+
+    def select(self):
+
+        # Compute new inputs, levels and partitions
+        sax_inputs = self.merge_inputs(self.fg_mask.I, self.firing_graph.I, self.firing_graph.backward_firing['i'])
+        ax_levels = sax_inputs.T.dot(self.bf_map).A.sum(axis=1)
+        l_partitions = [{**p, "precision": None} for p in self.fg_mask.partitions]
+
+        # Create component
+        fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=ax_levels)
+
         import IPython
         IPython.embed()
-        # Get f_inputs that were already sampled
-        ax_mask_features =
-        self.visualize_fg(fg_selected)
 
-        pass
+        if self.plot_perf_enabled:
+            self.visualize_fg(YalaBasePatterns.from_fg_comp(fg_comp))
+
+        for i in range(self.bf_map.shape[1]):
+            sax_inputs_test = sax_inputs[:, 0].multiply(self.bf_map[:, i])
+            if sax_inputs_test.nnz > 0:
+                ax_levels_test = sax_inputs_test.T.dot(self.bf_map).A.sum(axis=1)
+                l_partitions_tests = [{**p, "precision": None} for p in self.fg_mask.partitions]
+                fg_comp_test = FgComponents(inputs=sax_inputs_test, partitions=l_partitions_tests, levels=ax_levels_test)
+                self.visualize_fg(YalaBasePatterns.from_fg_comp(fg_comp_test))
+                import IPython
+                IPython.embed()
+
+        return fg_comp
 
     def reset(self):
         self.reset_all()

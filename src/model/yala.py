@@ -120,6 +120,8 @@ class Yala(object):
                 # Refine
                 component = refiner.prepare(component).drain_all().select()
                 refiner.reset()
+                import IPython
+                IPython.embed()
 
                 # Expand
                 fg, drainer_args = prepare_expansion(
