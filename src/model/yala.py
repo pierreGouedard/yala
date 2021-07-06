@@ -26,7 +26,7 @@ class Yala(object):
                  max_iter=5,
                  batch_size=1000,
                  draining_size=500,
-                 draining_margin=0.1,
+                 draining_margin=0.05,
                  n_node_by_iter=50,
                  level_0=1,
                  n_update=2,

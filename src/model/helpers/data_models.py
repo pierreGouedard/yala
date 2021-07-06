@@ -55,6 +55,9 @@ class DrainerFeedbacks:
     penalties: array
     rewards: array
 
+    def get_all(self):
+        return self.penalties, self.rewards
+
 
 @dataclass
 class DrainerParameters:
@@ -63,3 +66,7 @@ class DrainerParameters:
     margin: float
     feedbacks: Optional[DrainerFeedbacks] = None
     weights: Optional[array] = None
+    precisions: Optional[array] = None
+
+    def get_target_precisions(self):
+        return (self.precisions - self.margin).clip(min=self.margin + 0.01)

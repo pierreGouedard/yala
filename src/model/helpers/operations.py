@@ -77,30 +77,51 @@ class Refiner(FiringGraphDrainer):
 
         return self
 
-    def merge_inputs(self, mask_inputs, drained_inputs, count_activations):
+    def select_inputs(self, sax_weight, sax_count):
+
+        ax_p, ax_r = self.drainer_params.feedbacks.get_all()
+        ax_w, ax_target_prec = self.drainer_params.weights, self.drainer_params.get_target_precisions()
+
+        # Get input weights and count
+        sax_mask = (sax_weight > 0).multiply(sax_count > 0)
+
+        sax_nom = sax_weight.multiply(sax_mask) - sax_mask.dot(diags(ax_w, format='csc'))
+        sax_denom = sax_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc')))
+        sax_precision = sax_nom.multiply(sax_denom.astype(float).power(-1))
+        sax_precision += (sax_precision != 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
+
+        import IPython
+        IPython.embed()
+
+        return sax_precision > 0
+
+    def merge_inputs(self, sax_mask_inputs, sax_drained_weights, sax_count_activations):
+
+        sax_drained_inputs = self.select_inputs(sax_drained_weights, sax_count_activations)
 
         # Get new candidate features and their bits cardinality
-        ax_mask_features = ~mask_inputs.T.dot(self.bf_map).A
+        ax_mask_features = ~sax_mask_inputs.T.dot(self.bf_map).A
         ax_card_features = self.bf_map.sum(axis=0).A[[0] * ax_mask_features.shape[0], :] * ax_mask_features
 
         # Get cardinality of each drained feature's bits
-        ax_card_selected = drained_inputs.astype(int).T.dot(self.bf_map).A * ax_mask_features
+        ax_card_selected = sax_drained_inputs.astype(int).T.dot(self.bf_map).A * ax_mask_features
 
         # Choose new candidate features (cardinality above 0 and lower than feature cardinality)
         ax_mask_selected = (ax_card_selected < ax_card_features) * (0 < ax_card_selected)
-        # TODO: add min firing constraint and random selection with self.n_update
+
+        # TODO: add random selection with self.n_update
 
         sax_mask_new = self.bf_map.dot(csc_matrix(ax_mask_selected.T))
 
         # Compute new inputs from refined existing bits and new candidates bits
-        sax_inputs = drained_inputs.multiply(mask_inputs) + drained_inputs.multiply(sax_mask_new)
+        sax_inputs = sax_drained_inputs.multiply(sax_mask_inputs) + sax_drained_inputs.multiply(sax_mask_new)
 
-        return sax_inputs.multiply(count_activations > 0)
+        return sax_inputs
 
     def select(self):
 
         # Compute new inputs, levels and partitions
-        sax_inputs = self.merge_inputs(self.fg_mask.I, self.firing_graph.I, self.firing_graph.backward_firing['i'])
+        sax_inputs = self.merge_inputs(self.fg_mask.I, self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
         ax_levels = sax_inputs.T.dot(self.bf_map).A.sum(axis=1)
         l_partitions = [{**p, "precision": None} for p in self.fg_mask.partitions]
 
@@ -140,6 +161,7 @@ class Refiner(FiringGraphDrainer):
 
         ax_precisions = (sax_y.T.astype(int).dot(sax_x) / (sax_x.sum(axis=0) + 1e-6)).A[0]
         component.partitions = [{**p, 'precision': ax_precisions[i]} for i, p in enumerate(component.partitions)]
+        self.drainer_params.precisions = ax_precisions
 
     def update_drainer_params(self, component):
 
