@@ -8,16 +8,8 @@ from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedSe
 from src.model.helpers.data_models import DrainerParameters
 from src.model.utils import init_sample
 from src.model.helpers.encoder import MultiEncoders
-from src.model.helpers.operations import Refiner
-
-# TODO: Schedule of prod implementation of new paradigm:
-#   * 3. implement final selection of vertices:
-#       3.A. Remove duplicated factors ?
-#       3.B. Create reducer (mean, regul mean, logistic reg)
-#       3.C. Create encoding encoder
-#       3.D. Make it up to modern standard (MYPY, flake8, pytest)
-
-# TODO: finally clean the module and make it possible to use datalab to test data bases here
+from src.model.helpers.operations.refiner import Refiner
+from src.model.helpers.operations.expander import Expander
 
 
 class Yala(object):
@@ -91,19 +83,16 @@ class Yala(object):
         else:
             raise NotImplementedError
 
-        # TODO: the procedure is as follow:
-        #   Init: sample and init vertices
-        #   Core:
-        #       1. Refine: Refine sampled features and undiscovered one (add n_update)
-        #       2. Expand: Expand sampled feature
-
         # TODO: Given the new server, each time a global mask is applied, we should update the draining and batch size
-        #   There is still to implement the forward pattern mask => assume that draining will always operate on a
-        #   depth 1 pattern (this does not limit a firing graph to be much deeper, it just mean it for the draining prcess)
-        #   in other word there is no "deep draining" allowed here (may be once implement 1 just to see)
+        # TODO: Maintain a pool of candidate features (updated with refiner and expander)
 
         refiner = Refiner(
             self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing, n_update=self.n_update,
+            perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True
+        )
+
+        expander = Expander(
+            self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing,
             perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True
         )
 
@@ -124,9 +113,8 @@ class Yala(object):
                 IPython.embed()
 
                 # Expand
-                fg, drainer_args = prepare_expansion(
-                    partials, self.server, self.draining_size, 0.01, self.min_firing
-                )
+                component = expander.prepare(component).drain_all().select()
+                expander.reset()
 
                 # RE start from component and check stop criterion
                 components, completes = None, None
@@ -148,7 +136,6 @@ class Yala(object):
 
         import IPython
         IPython.embed()
-        # TODO: use patterns to segment database and fit decision tree on each segment
 
         #analyze_patterns(self.firing_graph, mapping_feature_input, X, y)
 

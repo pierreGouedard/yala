@@ -68,5 +68,5 @@ class DrainerParameters:
     weights: Optional[array] = None
     precisions: Optional[array] = None
 
-    def get_target_precisions(self):
+    def get_limit_precisions(self):
         return (self.precisions - self.margin).clip(min=self.margin + 0.01)
