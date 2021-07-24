@@ -3,6 +3,7 @@ import numpy as np
 from dataclasses import asdict
 from itertools import groupby
 from firing_graph.solver.drainer import FiringGraphDrainer
+from scipy.sparse import diags
 
 # Local import
 from src.model.utils import init_parameters
@@ -65,6 +66,21 @@ class YalaDrainer(FiringGraphDrainer):
 
     def select(self):
         pass
+
+    def select_inputs(self, sax_weight, sax_count):
+
+        ax_p, ax_r = self.drainer_params.feedbacks.get_all()
+        ax_w, ax_target_prec = self.drainer_params.weights, self.drainer_params.get_limit_precisions()
+
+        # Get input weights and count
+        sax_mask = (sax_weight > 0).multiply(sax_count > 0)
+
+        sax_nom = sax_weight.multiply(sax_mask) - sax_mask.dot(diags(ax_w, format='csc'))
+        sax_denom = sax_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc')))
+        sax_precision = sax_nom.multiply(sax_denom.astype(float).power(-1))
+        sax_precision += (sax_precision != 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
+
+        return sax_precision > (sax_precision > 0).dot(diags(ax_target_prec, format='csc'))
 
     def reset(self):
         self.reset_all()

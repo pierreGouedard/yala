@@ -5,7 +5,7 @@ from dataclasses import asdict
 # Local import
 from src.model.helpers.patterns import YalaBasePatterns
 from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedServer
-from src.model.helpers.data_models import DrainerParameters
+from src.model.helpers.data_models import DrainerParameters, FgComponents
 from src.model.utils import init_sample
 from src.model.helpers.encoder import MultiEncoders
 from src.model.helpers.operations.refiner import Refiner
@@ -109,24 +109,30 @@ class Yala(object):
                 # Refine
                 component = refiner.prepare(component).drain_all().select()
                 refiner.reset()
-                import IPython
-                IPython.embed()
 
                 # Expand
                 component = expander.prepare(component).drain_all().select()
                 expander.reset()
 
                 # RE start from component and check stop criterion
+                # TODO: Select components that has converged
+                #  keep components that has not improved (How to get them)
+                #  Keep components that have a fires less than min_firing but more than thresh_firing
+                # Some kind of early stopping where vertices prec is tracked from beginning => stop when doesn't improve
+                # enough (from prec curve) or when firing has just passed min_firing
+                # the precision curve should rise while the recall? whould decrease.
+                # Just remove the ones tht starts with a precision of 0 from the beginning.
+
                 components, completes = None, None
                 if True:
                     break
 
             # Augment current firing graph
             if self.firing_graph is not None:
-                self.firing_graph = self.firing_graph.augment_from_fg_comp(completes)
+                self.firing_graph = self.firing_graph.augment_from_fg_comp(completesor FgComponents.empty_comp())
 
             else:
-                self.firing_graph = YalaBasePatterns.from_fg_comp(completes)
+                self.firing_graph = YalaBasePatterns.from_fg_comp(completes or FgComponents.empty_comp())
 
             # Update server
             if len(completes) > 0:
@@ -136,30 +142,6 @@ class Yala(object):
 
         import IPython
         IPython.embed()
-
-        #analyze_patterns(self.firing_graph, mapping_feature_input, X, y)
-
-        # test_amplifier = RefineAmplifier(
-        #     self.server, mapping_feature_input, self.draining_size + 50000, min_size=self.min_firing,
-        #     max_precision=self.max_precision, ci_value=0.5, gap_fill_length=2, cover_thresh=0.8,
-        #     debug={"indices": [-6]}
-        # )
-
-        # fit logistic regression on patterns
-        from sklearn.linear_model import LogisticRegression
-        import itertools
-        from src.mlops.names import KVName
-
-        d_grid_params = {"penalty": ['l1', 'l2'], "C": [0.01, 0.1, 0.5, 1.0]}
-        d_glob_params = {"fit_intercept": True}
-        sax_x = self.firing_graph.propagate(X)
-        for i, cross_values in enumerate(itertools.product(*d_grid_params.values())):
-            d_search_params = d_glob_params.copy()
-            d_search_params.update(dict(zip(d_grid_params.keys(), cross_values)))
-
-            clf = LogisticRegression(**d_search_params)
-
-            self.d_merger[KVName.from_dict(d_search_params).to_string()] = clf.fit(sax_x.A, y.A[:, 0])
 
         return self
 

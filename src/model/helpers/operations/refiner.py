@@ -30,38 +30,22 @@ class Refiner(YalaDrainer):
         else:
             self.mask_candidate = csc_matrix(np.ones((1, self.bf_map.shape[1]), dtype=bool))
 
-    def select_inputs(self, sax_weight, sax_count):
+    def select(self):
 
-        ax_p, ax_r = self.drainer_params.feedbacks.get_all()
-        ax_w, ax_target_prec = self.drainer_params.weights, self.drainer_params.get_limit_precisions()
+        # Compute new inputs, levels and partitions
+        sax_inputs = self.select_features(self.fg_mask.I, self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
+        ax_levels = sax_inputs.T.dot(self.bf_map).A.sum(axis=1)
+        l_partitions = [{**p, "precision": None} for p in self.fg_mask.partitions]
 
-        # Get input weights and count
-        sax_mask = (sax_weight > 0).multiply(sax_count > 0)
+        # Create component
+        fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=ax_levels)
 
-        sax_nom = sax_weight.multiply(sax_mask) - sax_mask.dot(diags(ax_w, format='csc'))
-        sax_denom = sax_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc')))
-        sax_precision = sax_nom.multiply(sax_denom.astype(float).power(-1))
-        sax_precision += (sax_precision != 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
+        if self.plot_perf_enabled:
+            self.visualize_fg(YalaBasePatterns.from_fg_comp(fg_comp))
 
-        return sax_precision > (sax_precision > 0).dot(diags(ax_target_prec, format='csc'))
+        return fg_comp
 
-    def sample_from_mask(self, ax_mask):
-        # Prepare choice
-        (ny, nx), ax_linear = ax_mask.shape, np.arange(ax_mask.shape[1])
-        ind_choice = lambda x: list(choice(ax_linear[x], self.n_update, replace=False))
-
-        # Random choice among new candidate features
-        l_y_ind = sum([[i] * self.n_update if ax_mask[i, :].sum() > 0 else [] for i in range(ny)], [])
-        l_x_ind = sum([ind_choice(ax_mask[i, :]) if ax_mask[i, :].sum() > 0 else [] for i in range(ny)], [])
-
-        # Create new mask features
-        ax_mask_sampled = np.zeros((ny, nx), dtype=bool)
-        if l_y_ind:
-            ax_mask[l_y_ind, l_x_ind] = True
-
-        return ax_mask_sampled
-
-    def merge_inputs(self, sax_mask_inputs, sax_drained_weights, sax_count_activations):
+    def select_features(self, sax_mask_inputs, sax_drained_weights, sax_count_activations):
 
         # Get bits with limit_precision
         sax_drained_inputs = self.select_inputs(sax_drained_weights, sax_count_activations)
@@ -82,20 +66,21 @@ class Refiner(YalaDrainer):
 
         return sax_inputs
 
-    def select(self):
+    def sample_from_mask(self, ax_mask):
+        # Prepare choice
+        (ny, nx), ax_linear = ax_mask.shape, np.arange(ax_mask.shape[1])
+        ind_choice = lambda x: list(choice(ax_linear[x], self.n_update, replace=False))
 
-        # Compute new inputs, levels and partitions
-        sax_inputs = self.merge_inputs(self.fg_mask.I, self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
-        ax_levels = sax_inputs.T.dot(self.bf_map).A.sum(axis=1)
-        l_partitions = [{**p, "precision": None} for p in self.fg_mask.partitions]
+        # Random choice among new candidate features
+        l_y_ind = sum([[i] * self.n_update if ax_mask[i, :].sum() > 0 else [] for i in range(ny)], [])
+        l_x_ind = sum([ind_choice(ax_mask[i, :]) if ax_mask[i, :].sum() > 0 else [] for i in range(ny)], [])
 
-        # Create component
-        fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=ax_levels)
+        # Create new mask features
+        ax_mask_sampled = np.zeros((ny, nx), dtype=bool)
+        if l_y_ind:
+            ax_mask[l_y_ind, l_x_ind] = True
 
-        if self.plot_perf_enabled:
-            self.visualize_fg(YalaBasePatterns.from_fg_comp(fg_comp))
-
-        return fg_comp
+        return ax_mask_sampled
 
     def build_patterns(self, component):
 

@@ -2,8 +2,9 @@
 # Global import
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from numpy import array, empty, hstack
+from numpy import array, empty, hstack, ones
 from scipy.sparse import spmatrix, csc_matrix, hstack as sphstack
+from copy import deepcopy as copy
 
 # Local import
 
@@ -48,6 +49,17 @@ class FgComponents:
         self.inputs, self.levels = self.inputs[:, l_idx], self.levels[l_idx]
 
         return tmp
+
+    def complement(self, sax_mask=None):
+        sax_inputs = csc_matrix(self.inputs.A ^ ones(self.inputs.shape, dtype=bool))
+
+        if sax_mask is not None:
+            sax_inputs = sax_inputs.multiply(sax_mask)
+
+        return FgComponents(inputs=sax_inputs, partitions=copy(self.partitions), levels=self.levels.copy())
+
+    def copy(self):
+        return FgComponents(inputs=self.inputs.copy(), partitions=copy(self.partitions), levels=self.levels.copy())
 
 
 @dataclass
