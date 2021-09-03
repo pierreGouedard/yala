@@ -13,10 +13,24 @@ class FgComponents:
     inputs: spmatrix
     partitions: List[Dict[str, Any]]
     levels: array
+    __idx: int = 0
 
     @staticmethod
     def empty_comp():
         return FgComponents(csc_matrix((0, 0)), [], empty((0,)))
+
+    def __iter__(self):
+        self.__idx = 0
+        return self
+
+    def __next__(self):
+        if self.__idx >= len(self):
+            raise StopIteration
+
+        _next = self[self.__idx]
+        self.__idx += 1
+
+        return _next
 
     def __len__(self):
         return self.levels.shape[0]

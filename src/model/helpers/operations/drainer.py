@@ -42,9 +42,8 @@ class YalaDrainer(FiringGraphDrainer):
         self.perf_plotter(ax_yhat)
 
     def prepare(self, component):
-        # Update precision and drainer params
-        self.update_precision(component)
-        self.update_drainer_params(component)
+        # Update drainer params
+        self.update_params(component)
 
         # Build top and bottom patterns
         self.build_patterns(component)
@@ -86,26 +85,17 @@ class YalaDrainer(FiringGraphDrainer):
         self.reset_all()
         self.firing_graph, self.fg_mask = None, None
 
-    def update_precision(self, component):
+    def update_params(self, component):
         # Get masked activations
         sax_x = self.server.next_forward(n=self.drainer_params.batch_size, update_step=False).sax_data_forward
         sax_y = self.server.next_backward(n=self.drainer_params.batch_size, update_step=False).sax_data_backward
 
         # Compute precision of each vertex and update partitions
         sax_x = YalaBasePatterns.from_fg_comp(component).propagate(sax_x)
+        self.drainer_params.precisions = (sax_y.T.astype(int).dot(sax_x) / (sax_x.sum(axis=0) + 1e-6)).A[0]
 
-        ax_precisions = (sax_y.T.astype(int).dot(sax_x) / (sax_x.sum(axis=0) + 1e-6)).A[0]
-        component.partitions = [{**p, 'precision': ax_precisions[i]} for i, p in enumerate(component.partitions)]
-        self.drainer_params.precisions = ax_precisions
-
-    def update_drainer_params(self, component):
-
-        # Get precision from component
-        ax_precisions = np.array([p['precision'] for p in component.partitions])
-
-        # Compute and update feedbacks and weights used in draining
-        self.drainer_params.feedbacks, self.drainer_params.weights = \
-            init_parameters(ax_precisions, self.drainer_params.margin, self.min_firing)
+        # Compute penalty / rewards
+        self.drainer_params = init_parameters(self.drainer_params, self.min_firing)
         self.update_pr(**asdict(self.drainer_params.feedbacks))
 
     def build_patterns(self, component):

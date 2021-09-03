@@ -1,5 +1,7 @@
 # Global import
 import numpy as np
+from random import choices
+from string import ascii_uppercase, digits
 from scipy.signal import convolve2d
 from scipy.sparse import csc_matrix
 
@@ -24,18 +26,25 @@ def init_sample(n, server, l0, sax_bf_map, window_length):
     # Create comp and compute precisions
     bottom_comp = FgComponents(
         inputs=csc_matrix(ax_inputs), levels=(ax_inputs.T.dot(sax_bf_map.A) > 0).sum(axis=1),
-        partitions=[{'label_id': 0} for _ in range(n)]
+        partitions=[{'label_id': 0, 'id': ''.join(choices(ascii_uppercase + digits, k=5))} for _ in range(n)],
     )
     return bottom_comp
 
 
-def init_parameters(ax_precision, margin, min_firing):
+def init_parameters(drainer_params, min_firing):
 
+    # Get params
+    ax_precision, margin = drainer_params.precisions, drainer_params.margin
     ax_precision = ax_precision.clip(max=1., min=margin + 0.01)
-    ax_p, ax_r = set_feedbacks(ax_precision - margin, ax_precision - (margin / 2))
-    ax_weights = ((ax_p - ((ax_precision - margin) * (ax_p + ax_r))) * min_firing).astype(int) + 1
 
-    return DrainerFeedbacks(penalties=ax_p, rewards=ax_r), ax_weights
+    # Compute penalty and reward values
+    ax_p, ax_r = set_feedbacks(ax_precision - margin, ax_precision - (margin / 2))
+    drainer_params.feedbacks = DrainerFeedbacks(penalties=ax_p, rewards=ax_r)
+
+    # Compute weights
+    drainer_params.weights = ((ax_p - ((ax_precision - margin) * (ax_p + ax_r))) * min_firing).astype(int) + 1
+
+    return drainer_params
 
 
 def set_feedbacks(ax_phi_old, ax_phi_new, r_max=1000):

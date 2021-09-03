@@ -35,7 +35,7 @@ class Refiner(YalaDrainer):
         # Compute new inputs, levels and partitions
         sax_inputs = self.select_features(self.fg_mask.I, self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
         ax_levels = sax_inputs.T.dot(self.bf_map).A.sum(axis=1)
-        l_partitions = [{**p, "precision": None} for p in self.fg_mask.partitions]
+        l_partitions = [{**p, "precision": None, "n_firing": None} for p in self.fg_mask.partitions]
 
         # Create component
         fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=ax_levels)
@@ -49,13 +49,14 @@ class Refiner(YalaDrainer):
 
         # Get bits with limit_precision
         sax_drained_inputs = self.select_inputs(sax_drained_weights, sax_count_activations)
+        sax_no_signal = csc_matrix(np.ones(sax_count_activations.shape, dtype=bool)) - (sax_count_activations > 0)
 
         # Get new candidate features and their bits cardinality
         ax_mask_features = ~sax_mask_inputs.T.dot(self.bf_map).A
         ax_card_features = self.bf_map.sum(axis=0).A[[0] * ax_mask_features.shape[0], :] * ax_mask_features
 
-        # Get cardinality of each drained feature's bits
-        ax_card_selected = sax_drained_inputs.astype(int).T.dot(self.bf_map).A * ax_mask_features
+        # Get cardinality of each selected feature
+        ax_card_selected = (sax_drained_inputs + sax_no_signal).astype(int).T.dot(self.bf_map).A * ax_mask_features
 
         # Choose new candidate features (cardinality above 0 and lower than feature cardinality)
         ax_mask_selected = self.sample_from_mask((ax_card_selected < ax_card_features) * (0 < ax_card_selected))
@@ -78,7 +79,7 @@ class Refiner(YalaDrainer):
         # Create new mask features
         ax_mask_sampled = np.zeros((ny, nx), dtype=bool)
         if l_y_ind:
-            ax_mask[l_y_ind, l_x_ind] = True
+            ax_mask_sampled[l_y_ind, l_x_ind] = True
 
         return ax_mask_sampled
 
