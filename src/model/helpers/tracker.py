@@ -8,12 +8,11 @@ import numpy as np
 class Tracker():
     tracking_infos = ['precision', 'n_firing', 'n_no_gain']
 
-    def __init__(self, l_ids, min_firing, min_precision_gain, min_size_gain, max_no_gain=2):
+    def __init__(self, l_ids, min_firing, tracker_params):
 
         # Completion criterion
         self.min_firing = min_firing
-        self.min_prec_gain, self.min_size_gain = min_precision_gain, min_size_gain
-        self.max_no_gain = max_no_gain
+        self.tracker_params = tracker_params
 
         # Attributes init
         self.indicator_tracker = {nid: [] for nid in l_ids}
@@ -43,16 +42,19 @@ class Tracker():
             # Test whether the min precision and size gain is reached
             prec_gain = d_new['precision'] - d_prev.get('precision', 0)
             size_gain = (d_new['n_firing'] - d_prev.get('n_firing', 1)) / d_prev.get('n_firing', 1)
-            prec_stop_criterion, size_stop_criterion = prec_gain < self.min_prec_gain, size_gain < self.min_size_gain
+            prec_stop_criterion = prec_gain < self.tracker_params.min_prec_gain
+            size_stop_criterion = size_gain < self.tracker_params.min_size_gain
 
             if size_stop_criterion and prec_stop_criterion:
                 self.update_tracker(d_new["id"], {k: d_new.get(k, d_prev.get(k, 0) + 1) for k in self.tracking_infos})
 
-                if d_prev['n_no_gain'] + 1 > self.max_no_gain:
+                if d_prev['n_no_gain'] + 1 > self.tracker_params.max_no_gain:
                     components.pop(i)
                     done = i >= len(components)
                     continue
-
+                # Update loop params
+                i += 1
+                done = i >= len(components)
                 continue
 
             # Update tracker indicators and update loop params

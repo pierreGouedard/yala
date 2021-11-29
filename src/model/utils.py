@@ -9,15 +9,15 @@ from scipy.sparse import csc_matrix
 from src.model.helpers.data_models import DrainerFeedbacks, FgComponents
 
 
-def init_sample(n, server, l0, sax_bf_map, window_length):
+def init_sample(n, l, server, sax_bf_map, window_length):
 
     # Get dimensions
     (n_inputs, n_features) = sax_bf_map.shape
 
     # Sample features
-    ax_indices = np.random.choice(n_features,  l0 * n)
+    ax_indices = np.random.choice(n_features,  l * n)
     ax_mask = np.zeros((n_features, n), dtype=bool)
-    ax_mask[ax_indices, np.array([i // l0 for i in range(l0 * n)])] = True
+    ax_mask[ax_indices, np.array([i // l for i in range(l * n)])] = True
 
     # Sample inputs and expand it
     ax_inputs = convolve2d(server.get_random_samples(n).A.astype(int).T, np.ones((window_length, 1)), mode='same')

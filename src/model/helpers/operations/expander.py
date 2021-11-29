@@ -1,6 +1,7 @@
 # Global import
 import numpy as np
 from scipy.sparse import diags, csc_matrix
+from numpy.random import choice
 from matplotlib import pyplot as plt
 
 # Local import
@@ -13,31 +14,11 @@ class Expander(YalaDrainer):
     """Expander"""
 
     def __init__(
-            self, server, sax_bf_map, drainer_params, min_firing=100, perf_plotter=None, plot_perf_enabled=False,
+            self, server, sax_bf_map, drainer_params, min_firing=100, n_update=1, perf_plotter=None, plot_perf_enabled=False,
             plot_ind=0
     ):
         # call parent constructor
         super().__init__(server, sax_bf_map, drainer_params, min_firing, perf_plotter, plot_perf_enabled)
-
-    def select(self):
-
-        # Compute new inputs, levels and partitions
-        sax_inputs, ax_n_firing = self.merge_inputs(
-            self.fg_mask.I, self.firing_graph.Iw, self.firing_graph.backward_firing['i']
-        )
-        ax_levels = sax_inputs.T.dot(self.bf_map).A.sum(axis=1)
-        l_partitions = [
-            {**p, "precision": self.drainer_params.precisions[i], "n_firing": ax_n_firing[i]}
-            for i, p in enumerate(self.fg_mask.partitions)
-        ]
-
-        # Create component
-        fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=ax_levels)
-
-        if self.plot_perf_enabled:
-            self.visualize_fg(YalaBasePatterns.from_fg_comp(fg_comp))
-
-        return fg_comp
 
     def __visualize_multi_expansion(self, sax_i_new, ax_selection_mask):
         # for each selected bounds
@@ -100,6 +81,26 @@ class Expander(YalaDrainer):
 
         plt.show()
 
+    def select(self):
+
+        # Compute new inputs, levels and partitions
+        sax_inputs, ax_n_firing = self.merge_inputs(
+            self.fg_mask.I, self.firing_graph.Iw, self.firing_graph.backward_firing['i']
+        )
+        ax_levels = sax_inputs.T.dot(self.bf_map).A.sum(axis=1)
+        l_partitions = [
+            {**p, "precision": self.drainer_params.precisions[i], "n_firing": ax_n_firing[i]}
+            for i, p in enumerate(self.fg_mask.partitions)
+        ]
+
+        # Create component
+        fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=ax_levels)
+
+        if self.plot_perf_enabled:
+            self.visualize_fg(YalaBasePatterns.from_fg_comp(fg_comp))
+
+        return fg_comp
+
     def merge_inputs(self, sax_mask_inputs, sax_drained_weights, sax_count_activations):
         # Get selected bits and and merge with base bit
         sax_drained_inputs = self.select_inputs(sax_drained_weights, sax_count_activations)
@@ -109,10 +110,13 @@ class Expander(YalaDrainer):
         # Compute nb firing
         ax_n_firing = sax_count_activations.sum(axis=0).A[0].astype(int)
 
-        # Selected feature based on feature cardinality
-        ax_card_features = self.bf_map.sum(axis=0).A[[0] * sax_merged_inputs.shape[1], :]
-        ax_card_selected = (sax_merged_inputs + sax_no_signal).astype(int).T.dot(self.bf_map).A
-        ax_mask_selected = (ax_card_selected < ax_card_features) * (0 < ax_card_selected)
+        # Get new candidate features and their bits cardinality
+        ax_mask_features = sax_mask_inputs.T.dot(self.bf_map).A
+        ax_card_features = self.bf_map.sum(axis=0).A[[0] * ax_mask_features.shape[0], :] * ax_mask_features
+
+        # Select bounds to remove
+        ax_card_no_signal = (sax_mask_inputs + sax_no_signal).astype(int).T.dot(self.bf_map).A
+        ax_mask_selected = ax_card_no_signal < ax_card_features
 
         # Visualize result of expansion
         if self.plot_perf_enabled:
@@ -123,21 +127,6 @@ class Expander(YalaDrainer):
 
         return sax_inputs, ax_n_firing
 
-    def sample_from_mask(self, ax_mask):
-        # Prepare choice
-        (ny, nx), ax_linear = ax_mask.shape, np.arange(ax_mask.shape[1])
-        ind_choice = lambda x: list(choice(ax_linear[x], self.n_update, replace=False))
-
-        # Random choice among new candidate features
-        l_y_ind = sum([[i] * self.n_update if ax_mask[i, :].sum() > 0 else [] for i in range(ny)], [])
-        l_x_ind = sum([ind_choice(ax_mask[i, :]) if ax_mask[i, :].sum() > 0 else [] for i in range(ny)], [])
-
-        # Create new mask features
-        ax_mask_sampled = np.zeros((ny, nx), dtype=bool)
-        if l_y_ind:
-            ax_mask_sampled[l_y_ind, l_x_ind] = True
-
-        return ax_mask_sampled
     def build_patterns(self, component):
         # Create mask pattern from comp
         mask_component = component.copy()

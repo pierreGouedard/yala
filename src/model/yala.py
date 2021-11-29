@@ -3,7 +3,7 @@
 # Local import
 from src.model.helpers.patterns import YalaBasePatterns
 from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedServer
-from src.model.helpers.data_models import DrainerParameters, FgComponents
+from src.model.helpers.data_models import DrainerParameters, TrackerParameters, FgComponents
 from src.model.utils import init_sample
 from src.model.helpers.encoder import MultiEncoders
 from src.model.helpers.operations.refiner import Refiner
@@ -18,46 +18,40 @@ class Yala(object):
                  batch_size=1000,
                  draining_size=500,
                  draining_margin=0.05,
-                 n_node_by_iter=50,
-                 level_0=1,
-                 n_update=2,
+                 n_parallel=50,
+                 init_level=1,
+                 n_update=1,
                  dropout_rate_mask=0.2,
                  min_firing=10,
                  min_precision_gain=0.01,
-                 min_size_gain= 0.05,
+                 min_size_gain=0.05,
                  max_no_gain=2,
                  server_type='unclassified',
                  n_bin=10,
                  bin_method='quantile',
                  bin_missing=False,
-                 n_augment=0,
-                 basis='norm'
     ):
 
         # Core parameters
         self.max_iter = max_iter
-        self.level_0 = level_0
+        self.n_parallel = n_parallel
+        self.init_level = init_level
         self.n_update = n_update
-        self.n_node_by_iter = n_node_by_iter
         self.min_firing = min_firing
 
         # Encoder params
-        self.encoder = MultiEncoders(n_bin, bin_method, bin_missing=bin_missing, n_augment=n_augment, basis=basis)
+        self.encoder = MultiEncoders(n_bin, bin_method, bin_missing=bin_missing)
 
         # Server params
-        self.server_type = server_type
-        self.dropout_rate_mask = dropout_rate_mask
-        self.server = None
+        self.server_type, self.dropout_rate_mask, self.server = server_type, dropout_rate_mask, None
 
         # Drainer params
-        self.drainer_params = DrainerParameters(
-            total_size=draining_size, batch_size=batch_size, margin=draining_margin
-        )
+        self.drainer_params = DrainerParameters(total_size=draining_size, batch_size=batch_size, margin=draining_margin)
 
         # Tracker params
-        self.min_precision_gain = min_precision_gain
-        self.min_size_gain = min_size_gain
-        self.max_no_gain = max_no_gain
+        self.tracker_params = TrackerParameters(
+            min_precision_gain=min_precision_gain, min_size_gain=min_size_gain, max_no_gain=max_no_gain
+        )
 
         # Yala Core attributes
         self.firing_graph = None
@@ -75,7 +69,7 @@ class Yala(object):
         :param sample_weight:
         :return:
         """
-        # encode X is a numpy/scipy array, y in numpy/scipy array
+        # encode: X is a numpy/scipy array, y in numpy/scipy array
         X_enc, y_enc = self.encoder.fit_transform(X=X, y=y)
 
         # Instantiate core components
@@ -106,12 +100,12 @@ class Yala(object):
 
             # Initial sampling
             component = init_sample(
-                self.n_node_by_iter, self.server, self.level_0, self.encoder.bf_map, window_length=3
+                self.n_parallel, self.init_level, self.server, self.encoder.bf_map, window_length=3
             )
 
             # Instantiate tracking
             tracker = Tracker(
-                [d['id'] for d in component.partitions], self.min_firing, self.min_precision_gain, self.min_size_gain
+                [d['id'] for d in component.partitions], min_firing=self.min_firing, tracker_params=self.tracker_params
             )
 
             # Core loop
@@ -129,15 +123,21 @@ class Yala(object):
                 # Track metrics
                 component = tracker.pop_complete(component)
                 i += 1
+                print(i)
 
                 if component is None:
+                    print('here')
                     import IPython
                     IPython.embed()
 
                 if i % 5 == 0:
+                    print('there')
                     tracker.visualize_indicators()
                     import IPython
                     IPython.embed()
+
+            import IPython
+            IPython.embed()
             # Augment current firing graph
             completes = tracker.get_complete_component()
             if self.firing_graph is not None:

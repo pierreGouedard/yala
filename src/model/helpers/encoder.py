@@ -72,10 +72,8 @@ class Encoder(object):
 class MultiEncoders():
     _NUMERIC_KINDS = set('buifc')
 
-    def __init__(self, n_bin, bin_method, bin_missing=False, n_augment=0, basis="norm"):
+    def __init__(self, n_bin, bin_method, bin_missing=False):
         # global parameters
-        self.n_augment = n_augment
-        self.type_basis = basis
         self.p_encoder = {"n_bin": n_bin, "bin_method": bin_method, "bin_missing": bin_missing}
 
         # parameters to fit

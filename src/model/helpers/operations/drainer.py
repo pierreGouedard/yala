@@ -69,7 +69,7 @@ class YalaDrainer(FiringGraphDrainer):
     def select_inputs(self, sax_weight, sax_count):
 
         ax_p, ax_r = self.drainer_params.feedbacks.get_all()
-        ax_w, ax_target_prec = self.drainer_params.weights, self.drainer_params.get_limit_precisions()
+        ax_w, ax_target_prec = self.drainer_params.weights, self.drainer_params.limit_precisions()
 
         # Get input weights and count
         sax_mask = (sax_weight > 0).multiply(sax_count > 0)
