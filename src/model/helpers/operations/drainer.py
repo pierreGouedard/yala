@@ -31,8 +31,8 @@ class YalaDrainer(FiringGraphDrainer):
         super().__init__(None, server, self.drainer_params.batch_size)
 
     def visualize_fg(self, firing_graph):
-        if self.plot_perf_enabled is None or not self.plot_perf_enabled:
-            raise ValueError('Impossible to visualize firing graph: not plot perf or nt enables.')
+        if self.plot_perf_enabled is None:
+            raise ValueError('Impossible to visualize firing graph: not plot perf.')
 
         # Get masked activations
         sax_x = self.server.get_sub_forward(self.perf_plotter.indices)
@@ -43,7 +43,7 @@ class YalaDrainer(FiringGraphDrainer):
 
     def prepare(self, component):
         # Update drainer params
-        self.update_params(component)
+        self.update_drainer_params(component)
 
         # Build top and bottom patterns
         self.build_patterns(component)
@@ -85,7 +85,7 @@ class YalaDrainer(FiringGraphDrainer):
         self.reset_all()
         self.firing_graph, self.fg_mask = None, None
 
-    def update_params(self, component):
+    def update_drainer_params(self, component):
         # Get masked activations
         sax_x = self.server.next_forward(n=self.drainer_params.batch_size, update_step=False).sax_data_forward
         sax_y = self.server.next_backward(n=self.drainer_params.batch_size, update_step=False).sax_data_backward

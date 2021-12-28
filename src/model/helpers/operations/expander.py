@@ -14,10 +14,11 @@ class Expander(YalaDrainer):
     """Expander"""
 
     def __init__(
-            self, server, sax_bf_map, drainer_params, min_firing=100, n_update=1, perf_plotter=None, plot_perf_enabled=False,
-            plot_ind=0
+            self, server, sax_bf_map, drainer_params, min_firing=100, perf_plotter=None, plot_perf_enabled=False,
+            advanced_plot_perf_enabled=False
     ):
         # call parent constructor
+        self.advanced_plot_perf_enabled = advanced_plot_perf_enabled
         super().__init__(server, sax_bf_map, drainer_params, min_firing, perf_plotter, plot_perf_enabled)
 
     def __visualize_multi_expansion(self, sax_i_new, ax_selection_mask):
@@ -84,12 +85,12 @@ class Expander(YalaDrainer):
     def select(self):
 
         # Compute new inputs, levels and partitions
-        sax_inputs, ax_n_firing = self.merge_inputs(
+        sax_inputs, ax_metrics = self.merge_inputs(
             self.fg_mask.I, self.firing_graph.Iw, self.firing_graph.backward_firing['i']
         )
         ax_levels = sax_inputs.T.dot(self.bf_map).A.sum(axis=1)
         l_partitions = [
-            {**p, "precision": self.drainer_params.precisions[i], "n_firing": ax_n_firing[i]}
+            {**p, "precision": self.drainer_params.precisions[i], "area": sax_inputs.sum(axis=0).A[0, i]}
             for i, p in enumerate(self.fg_mask.partitions)
         ]
 
@@ -102,13 +103,10 @@ class Expander(YalaDrainer):
         return fg_comp
 
     def merge_inputs(self, sax_mask_inputs, sax_drained_weights, sax_count_activations):
-        # Get selected bits and and merge with base bit
+        # Get selected bits and merge with base bit
         sax_drained_inputs = self.select_inputs(sax_drained_weights, sax_count_activations)
         sax_merged_inputs = sax_mask_inputs + sax_drained_inputs
         sax_no_signal = csc_matrix(np.ones(sax_count_activations.shape, dtype=bool)) - (sax_count_activations > 0)
-
-        # Compute nb firing
-        ax_n_firing = sax_count_activations.sum(axis=0).A[0].astype(int)
 
         # Get new candidate features and their bits cardinality
         ax_mask_features = sax_mask_inputs.T.dot(self.bf_map).A
@@ -119,13 +117,14 @@ class Expander(YalaDrainer):
         ax_mask_selected = ax_card_no_signal < ax_card_features
 
         # Visualize result of expansion
-        if self.plot_perf_enabled:
+        if self.advanced_plot_perf_enabled:
             self.__visualize_multi_expansion(sax_merged_inputs, ax_mask_selected)
 
         # Compute new inputs from mask of feature
         sax_inputs = sax_merged_inputs.multiply(self.bf_map.dot(csc_matrix(ax_mask_selected.T)))
+        ax_metrics = sax_inputs.sum(axis=0).A[0, :] / sax_inputs.T.dot(self.bf_map).sum(axis=1).A[:, 0]
 
-        return sax_inputs, ax_n_firing
+        return sax_inputs, ax_metrics
 
     def build_patterns(self, component):
         # Create mask pattern from comp

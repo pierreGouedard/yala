@@ -70,11 +70,12 @@ class Refiner(YalaDrainer):
     def sample_from_mask(self, ax_mask):
         # Prepare choice
         (ny, nx), ax_linear = ax_mask.shape, np.arange(ax_mask.shape[1])
-        ind_choice = lambda x: list(choice(ax_linear[x], self.n_update, replace=False))
+        ax_counts = ax_mask.sum(axis=1).clip(max=self.n_update)
+        ind_choice = lambda x, n: list(choice(ax_linear[x], n, replace=False))
 
         # Random choice among new candidate features
-        l_y_ind = sum([[i] * self.n_update if ax_mask[i, :].sum() > 0 else [] for i in range(ny)], [])
-        l_x_ind = sum([ind_choice(ax_mask[i, :]) if ax_mask[i, :].sum() > 0 else [] for i in range(ny)], [])
+        l_y_ind = sum([[i] * ax_counts[i] for i in range(ny)], [])
+        l_x_ind = sum([ind_choice(ax_mask[i, :], ax_counts[i]) for i in range(ny)], [])
 
         # Create new mask features
         ax_mask_sampled = np.zeros((ny, nx), dtype=bool)

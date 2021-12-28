@@ -14,7 +14,8 @@ from src.model.helpers.tracker import Tracker
 class Yala(object):
 
     def __init__(self,
-                 max_iter=5,
+                 n_run=5,
+                 max_iter=20,
                  batch_size=1000,
                  draining_size=500,
                  draining_margin=0.05,
@@ -25,14 +26,14 @@ class Yala(object):
                  min_firing=10,
                  min_precision_gain=0.01,
                  min_size_gain=0.05,
-                 max_no_gain=2,
+                 max_no_gain=3,
                  server_type='unclassified',
                  n_bin=10,
                  bin_method='quantile',
                  bin_missing=False,
     ):
-
         # Core parameters
+        self.n_run = n_run
         self.max_iter = max_iter
         self.n_parallel = n_parallel
         self.init_level = init_level
@@ -82,20 +83,17 @@ class Yala(object):
         else:
             raise NotImplementedError
 
-        # TODO: Given the new server, each time a global mask is applied, we should update the draining and batch size
-        # TODO: Maintain a pool of candidate features (updated with refiner and expander)
-
         refiner = Refiner(
             self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing, n_update=self.n_update,
-            perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True
+            perf_plotter=kwargs.get('perf_plotter', None)
         )
 
         expander = Expander(
             self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing,
-            perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True
+            perf_plotter=kwargs.get('perf_plotter', None)
         )
 
-        for i in range(self.max_iter):
+        for i in range(self.n_run):
             print("[YALA]: Iteration {}".format(i))
 
             # Initial sampling
@@ -105,12 +103,12 @@ class Yala(object):
 
             # Instantiate tracking
             tracker = Tracker(
-                [d['id'] for d in component.partitions], min_firing=self.min_firing, tracker_params=self.tracker_params
+                [d['id'] for d in component.partitions], tracker_params=self.tracker_params
             )
 
             # Core loop
             i = 0
-            while len(component) > 0:
+            while len(component) > 0 and i < self.max_iter:
 
                 # Refine
                 component = refiner.prepare(component).drain_all().select()
@@ -123,37 +121,27 @@ class Yala(object):
                 # Track metrics
                 component = tracker.pop_complete(component)
                 i += 1
-                print(i)
 
                 if component is None:
-                    print('here')
-                    import IPython
-                    IPython.embed()
+                    break
 
-                if i % 5 == 0:
-                    print('there')
-                    tracker.visualize_indicators()
-                    import IPython
-                    IPython.embed()
+            # TODO:
+            #   Introduce a dropout rate before, expander
+            #   Spend more time on expander true
 
-            import IPython
-            IPython.embed()
-            # Augment current firing graph
+            tracker.visualize_indicators()
             completes = tracker.get_complete_component()
-            if self.firing_graph is not None:
-                self.firing_graph = self.firing_graph.augment_from_fg_comp(completes or FgComponents.empty_comp())
+            for comp in completes:
+                expander.visualize_fg(YalaBasePatterns.from_fg_comp(comp))
 
-            else:
-                self.firing_graph = YalaBasePatterns.from_fg_comp(completes or FgComponents.empty_comp())
+            if self.firing_graph is not None and completes:
+                self.firing_graph = self.firing_graph.augment_from_fg_comp(sum(completes, FgComponents.empty_comp()))
 
-            # Update server
-            if len(completes) > 0:
-                self.server.update_mask_with_pattern(YalaBasePatterns.from_fg_comp(completes).reduce_output())
+            elif completes:
+                self.firing_graph = YalaBasePatterns.from_fg_comp(sum(completes, FgComponents.empty_comp()))
+
             self.server.sax_mask_forward = None
             self.server.pattern_backward = None
-
-        import IPython
-        IPython.embed()
 
         return self
 

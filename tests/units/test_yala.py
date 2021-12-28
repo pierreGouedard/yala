@@ -11,8 +11,8 @@ from src.model.yala import Yala
 class TestYala(unittest.TestCase):
     show_dataset = False
     p_yala = {
-        'draining_margin': 0.05, 'n_node_by_iter': 1, 'init_level': 3, 'n_update': 2, 'draining_size': 10000,
-        'batch_size': 5000, 'min_firing': 100, 'dropout_rate_mask': 0.99, 'max_iter': 100, 'n_bin': 10,
+        'draining_margin': 0.05, 'n_parallel': 1, 'init_level': 3, 'n_update': 2, 'draining_size': 10000,
+        'batch_size': 5000, 'min_firing': 100, 'dropout_rate_mask': 0.99, 'n_run': 100, 'n_bin': 50,
         'bin_method': 'quantile', 'bin_missing': False
     }
 

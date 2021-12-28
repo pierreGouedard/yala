@@ -6,12 +6,12 @@ import numpy as np
 
 
 class Tracker():
-    tracking_infos = ['precision', 'n_firing', 'n_no_gain']
+    tracking_infos = ['precision', 'area', 'n_no_gain']
 
-    def __init__(self, l_ids, min_firing, tracker_params):
+    def __init__(self, l_ids, tracker_params, min_area=1):
 
         # Completion criterion
-        self.min_firing = min_firing
+        self.min_area = min_area
         self.tracker_params = tracker_params
 
         # Attributes init
@@ -23,14 +23,14 @@ class Tracker():
         return self
 
     def pop_complete(self, components):
-
         l_complete_id, i, done = [], 0, False
         while not done:
             comp, prec_stop_criterion, size_stop_criterion = components[i], False, False
             d_new = comp.partitions[0]
             d_prev = {} if not self.indicator_tracker[d_new['id']] else self.indicator_tracker[d_new['id']][-1]
+
             # Test whether nb firing is high enough
-            if d_new['n_firing'] < self.min_firing:
+            if d_new['area'] < self.min_area:
                 self.update_tracker(d_new["id"], {k: d_new.get(k, d_prev.get(k, 0)) for k in self.tracking_infos})
                 components.pop(i)
                 done = i >= len(components)
@@ -41,8 +41,8 @@ class Tracker():
 
             # Test whether the min precision and size gain is reached
             prec_gain = d_new['precision'] - d_prev.get('precision', 0)
-            size_gain = (d_new['n_firing'] - d_prev.get('n_firing', 1)) / d_prev.get('n_firing', 1)
-            prec_stop_criterion = prec_gain < self.tracker_params.min_prec_gain
+            size_gain = (d_new['area'] - d_prev.get('area', 1)) / d_prev.get('area', 1)
+            prec_stop_criterion = prec_gain < self.tracker_params.min_precision_gain
             size_stop_criterion = size_gain < self.tracker_params.min_size_gain
 
             if size_stop_criterion and prec_stop_criterion:
@@ -71,7 +71,7 @@ class Tracker():
         # Plot for each node
         for k, v in self.indicator_tracker.items():
             ax_x = np.arange(len(v))
-            ax_precs, ax_sizes = np.array([d["precision"] for d in v]), np.array([d["n_firing"] for d in v])
+            ax_precs, ax_sizes = np.array([d["precision"] for d in v]), np.array([d["area"] for d in v])
 
             # Plot
             axe_prec.plot(ax_x, ax_precs, label=f"vertex {k}")
