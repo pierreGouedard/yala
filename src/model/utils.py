@@ -1,52 +1,53 @@
-# Global imports
+# Global import
 import numpy as np
-from scipy.sparse import csc_matrix, diags
+from random import choices
+from string import ascii_uppercase, digits
+from scipy.signal import convolve2d
+from scipy.sparse import csc_matrix
 
 # Local import
-from .patterns import YalaDrainingPatterns
+from src.model.helpers.data_models import DrainerFeedbacks, FgComponents
 
 
-def build_draining_firing_graph(sampler, drainer_params, pattern=None):
-    sax_inputs = sampler.sample(pattern).sax_inputs.dot(diags(drainer_params.weights, dtype=float))
-    return YalaDrainingPatterns.from_input_matrix(sax_inputs, drainer_params, sampler.n_label, base_patterns=pattern)
+def init_sample(n, l, server, sax_bf_map, window_length):
+
+    # Get dimensions
+    (n_inputs, n_features) = sax_bf_map.shape
+
+    # Sample features
+    ax_indices = np.random.choice(n_features,  l * n)
+    ax_mask = np.zeros((n_features, n), dtype=bool)
+    ax_mask[ax_indices, np.array([i // l for i in range(l * n)])] = True
+
+    # Sample inputs and expand it
+    ax_inputs = convolve2d(server.get_random_samples(n).A.astype(int).T, np.ones((window_length, 1)), mode='same')
+    ax_inputs = ax_inputs * sax_bf_map.A.dot(ax_mask.astype(int))
+
+    # Create comp and compute precisions
+    bottom_comp = FgComponents(
+        inputs=csc_matrix(ax_inputs), levels=(ax_inputs.T.dot(sax_bf_map.A) > 0).sum(axis=1),
+        partitions=[{'label_id': 0, 'id': ''.join(choices(ascii_uppercase + digits, k=5))} for _ in range(n)],
+    )
+    return bottom_comp
 
 
-def get_normalized_precision(sax_activations, ax_precision, ax_new_mask):
+def init_parameters(drainer_params, min_firing):
 
-    # If no candidate for norm return empty list
-    if not ax_new_mask.any():
-        return []
+    # Get params
+    ax_precision, margin = drainer_params.precisions, drainer_params.margin
+    ax_precision = ax_precision.clip(max=1., min=margin + 0.01)
 
-    # If only one candidate for norm return un-changed precision
-    if sax_activations.shape[-1] == 1:
-        return ax_precision
+    # Compute penalty and reward values
+    ax_p, ax_r = set_feedbacks(ax_precision - margin, ax_precision - (margin / 2))
+    drainer_params.feedbacks = DrainerFeedbacks(penalties=ax_p, rewards=ax_r)
 
-    # Build diff operator
-    n = sax_activations.shape[-1] - 1
-    sax_diff = diags(-1 * np.ones(n), offsets=1) + diags(np.ones(n + 1))
+    # Compute weights
+    drainer_params.weights = ((ax_p - ((ax_precision - margin) * (ax_p + ax_r))) * min_firing).astype(int) + 1
 
-    # Distribute activation
-    sax_activations_sub = sax_activations.dot(diags(ax_new_mask, dtype=bool))
-    sax_activation_cs = csc_matrix(sax_activations.toarray().cumsum(axis=1))
-    sax_dist = sax_activations_sub.astype(int).transpose().dot(sax_activation_cs > 0).dot(sax_diff)
-
-    # Compute standardized precision
-    ax_p = sax_dist[ax_new_mask, :].toarray().sum(axis=1) * ax_precision[ax_new_mask]
-    ax_p -= (sax_dist[ax_new_mask, :].toarray() * ax_precision).sum(axis=1)
-    ax_p += (sax_dist.diagonal()[ax_new_mask] * ax_precision[ax_new_mask])
-    ax_p /= sax_dist.diagonal()[ax_new_mask]
-
-    return ax_p
+    return drainer_params
 
 
 def set_feedbacks(ax_phi_old, ax_phi_new, r_max=1000):
-    """
-
-    :param phi_old:
-    :param phi_new:
-    :param r_max:
-    :return:
-    """
     ax_p, ax_r = np.zeros(ax_phi_new.shape), np.zeros(ax_phi_new.shape)
     for i, (phi_old, phi_new) in enumerate(zip(*[ax_phi_old, ax_phi_new])):
         p, r = set_feedback(phi_old, phi_new, r_max)
@@ -61,5 +62,3 @@ def set_feedback(phi_old, phi_new, r_max=1000):
         score = (phi_new * (p + r)) - p
         if score > 0.:
             return p, r
-
-    raise ValueError("Not possible to find feedback values to distinguish {} and {}".format(phi_old, phi_new))
