@@ -1,21 +1,26 @@
 # Global import
-import numpy as np
 from dataclasses import asdict
 from itertools import groupby
 from firing_graph.solver.drainer import FiringGraphDrainer
 from scipy.sparse import diags
+from abc import abstractmethod
 
 # Local import
+from src.model.helpers.data_models import FgComponents
 from src.model.utils import init_parameters
 from src.model.helpers.patterns import YalaBasePatterns, YalaTopPattern
 
 
 class YalaDrainer(FiringGraphDrainer):
     """Abstract child of Firing Graph specific to YALA algorithm."""
+    def __init__(
+            self, server, sax_bf_map, drainer_params, min_firing=100, pass_signal_to_builder=False
+    ):
+        # Map bit to features and candidate features
+        self.bf_map = sax_bf_map
 
-    def __init__(self, server, sax_bf_map, drainer_params, min_firing=100, perf_plotter=None, plot_perf_enabled=False):
-        # map bit to features and candidate features
-        self.bf_map, self.mask_candidate = sax_bf_map, None
+        # Option firing graph builder
+        self.pass_signal_to_builder = pass_signal_to_builder
 
         # Parameters for draining
         self.drainer_params = drainer_params
@@ -23,30 +28,31 @@ class YalaDrainer(FiringGraphDrainer):
         # complement attributes
         self.min_firing = min_firing
 
-        # Optional callable to visualize perf
-        self.perf_plotter = perf_plotter
-        self.plot_perf_enabled = plot_perf_enabled
+        # Handy
+        self.pre_draining_fg = None
 
         # call parent constructor
         super().__init__(None, server, self.drainer_params.batch_size)
 
-    def visualize_fg(self, firing_graph):
-        if self.plot_perf_enabled is None:
-            raise ValueError('Impossible to visualize firing graph: not plot perf.')
+    def b2f(self, sax_x):
+        return sax_x.T.dot(self.bf_map)
 
-        # Get masked activations
-        sax_x = self.server.get_sub_forward(self.perf_plotter.indices)
-        ax_yhat = firing_graph.propagate(sax_x).A
-
-        # Plot perf viz
-        self.perf_plotter(ax_yhat)
+    def f2b(self, sax_x):
+        return self.bf_map.dot(sax_x)
 
     def prepare(self, component):
-        # Update drainer params
-        self.update_drainer_params(component)
+        # Get triplet signals
+        sax_x, sax_y, sax_fg = self.get_triplet(component)
 
         # Build top and bottom patterns
-        self.build_patterns(component)
+        d_signals = {}
+        if self.pass_signal_to_builder:
+            d_signals = {"x": sax_x, "y": sax_y, "fg": sax_fg}
+
+        self.build_patterns(component, **d_signals)
+
+        # Set drainer params & set weights
+        self.setup_params(sax_y, sax_fg)
 
         return self
 
@@ -64,7 +70,38 @@ class YalaDrainer(FiringGraphDrainer):
         return self
 
     def select(self):
+        # Compute new inputs, levels and partitions
+        sax_inputs = self.select_support_bits(self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
+        l_partitions = self.update_partition_metrics(sax_inputs)
+
+        # Create component
+        fg_comp = FgComponents(
+            inputs=sax_inputs, partitions=l_partitions, levels=self.b2f(sax_inputs).A.sum(axis=1)
+        )
+
+        return fg_comp
+
+    @abstractmethod
+    def select_support_bits(self, sax_drained_weights, sax_count_activations):
         pass
+
+    def update_partition_metrics(self, sax_inputs):
+        # Get support features
+        ax_bounds = self.b2f(sax_inputs.astype(int)).A
+
+        # Compute metrics
+        ax_areas = sax_inputs.sum(axis=0).A[0, :] / ax_bounds.sum(axis=1)
+
+        l_metrics = [
+            {
+                **self.pre_draining_fg.partitions[i],
+                "precision": self.drainer_params.precisions[i],
+                "area": ax_areas[i],
+                'shape': ax_bounds[i]
+             }
+            for i in range(sax_inputs.shape[1])
+        ]
+        return l_metrics
 
     def select_inputs(self, sax_weight, sax_count):
 
@@ -79,24 +116,40 @@ class YalaDrainer(FiringGraphDrainer):
         sax_precision = sax_nom.multiply(sax_denom.astype(float).power(-1))
         sax_precision += (sax_precision != 0).dot(diags(ax_p / (ax_p + ax_r), format='csc'))
 
+        # Compute selected inputs
         return sax_precision > (sax_precision > 0).dot(diags(ax_target_prec, format='csc'))
 
     def reset(self):
         self.reset_all()
         self.firing_graph, self.fg_mask = None, None
 
-    def update_drainer_params(self, component):
+    def get_triplet(self, component):
         # Get masked activations
         sax_x = self.server.next_forward(n=self.drainer_params.batch_size, update_step=False).sax_data_forward
         sax_y = self.server.next_backward(n=self.drainer_params.batch_size, update_step=False).sax_data_backward
 
-        # Compute precision of each vertex and update partitions
-        sax_x = YalaBasePatterns.from_fg_comp(component).propagate(sax_x)
-        self.drainer_params.precisions = (sax_y.T.astype(int).dot(sax_x) / (sax_x.sum(axis=0) + 1e-6)).A[0]
+        # propagate through firing graph
+        sax_fg = YalaBasePatterns.from_fg_comp(component).propagate(sax_x)
+
+        return sax_x, sax_y, sax_fg
+
+    def setup_params(self, sax_y, sax_fg):
+        self.drainer_params.precisions = (sax_y.T.astype(int).dot(sax_fg) / (sax_fg.sum(axis=0) + 1e-6)).A[0]
 
         # Compute penalty / rewards
         self.drainer_params = init_parameters(self.drainer_params, self.min_firing)
         self.update_pr(**asdict(self.drainer_params.feedbacks))
 
-    def build_patterns(self, component):
+        # Update base matrix input's weights
+        sax_weights = diags(self.drainer_params.weights, format='csc', dtype=self.firing_graph.matrices['Iw'].dtype)
+        self.firing_graph.matrices['Iw'] = self.firing_graph.matrices['Iw'].dot(sax_weights)
+
+        # Update mask draining
+        self.firing_graph.matrices['Im'] = self.firing_graph.I
+
+        # Update firing graph from parent
+        self.reset_all()
+
+    @abstractmethod
+    def build_patterns(self, component, **kwargs):
         pass

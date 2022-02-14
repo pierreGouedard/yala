@@ -1,7 +1,7 @@
 # Global import
 import numpy as np
 from random import choices
-from string import ascii_uppercase, digits
+from string import ascii_uppercase
 from scipy.signal import convolve2d
 from scipy.sparse import csc_matrix
 
@@ -26,9 +26,33 @@ def init_sample(n, l, server, sax_bf_map, window_length):
     # Create comp and compute precisions
     bottom_comp = FgComponents(
         inputs=csc_matrix(ax_inputs), levels=(ax_inputs.T.dot(sax_bf_map.A) > 0).sum(axis=1),
-        partitions=[{'label_id': 0, 'id': ''.join(choices(ascii_uppercase + digits, k=5))} for _ in range(n)],
+        partitions=[
+            {'label_id': 0, 'id': ''.join(choices(ascii_uppercase, k=5)), "stage": "ongoing"} for _ in range(n)],
     )
     return bottom_comp
+
+
+def sample_from_mask(ax_mask, n=None, ax_n=None):
+    if ax_n is None:
+        ax_n = np.ones(ax_mask.shape[0], dtype=int) * n
+
+    # Prepare choice
+    (ny, nx), ax_linear = ax_mask.shape, np.arange(ax_mask.shape[1])
+    ax_counts = np.minimum(ax_mask.sum(axis=1), ax_n) * (ax_mask.sum(axis=1) >= ax_n)
+
+    def masked_choice(ax_mask, n):
+        return list(np.random.choice(ax_linear[ax_mask], n, replace=False))
+
+    # Random coordinate choice
+    l_y_ind = sum([[i] * ax_counts[i] for i in range(ny)], [])
+    l_x_ind = sum([masked_choice(ax_mask[i, :], ax_counts[i]) for i in range(ny)], [])
+
+    # Create new mask features
+    ax_mask_sampled = np.zeros((ny, nx), dtype=bool)
+    if l_y_ind:
+        ax_mask_sampled[l_y_ind, l_x_ind] = True
+
+    return ax_mask_sampled
 
 
 def init_parameters(drainer_params, min_firing):

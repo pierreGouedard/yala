@@ -6,8 +6,8 @@ from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedSe
 from src.model.helpers.data_models import DrainerParameters, TrackerParameters, FgComponents
 from src.model.utils import init_sample
 from src.model.helpers.encoder import MultiEncoders
-from src.model.helpers.operations.refiner import Refiner
-from src.model.helpers.operations.expander import Expander
+from src.model.helpers.operations.cleaner import Cleaner
+from src.model.helpers.operations.shaper import Shaper
 from src.model.helpers.tracker import Tracker
 
 
@@ -24,9 +24,9 @@ class Yala(object):
                  n_update=1,
                  dropout_rate_mask=0.2,
                  min_firing=10,
-                 min_precision_gain=0.01,
-                 min_size_gain=0.05,
-                 max_no_gain=3,
+                 min_shape_change=1,
+                 min_area_gain=0.05,
+                 max_no_changes=3,
                  server_type='unclassified',
                  n_bin=10,
                  bin_method='quantile',
@@ -51,7 +51,7 @@ class Yala(object):
 
         # Tracker params
         self.tracker_params = TrackerParameters(
-            min_precision_gain=min_precision_gain, min_size_gain=min_size_gain, max_no_gain=max_no_gain
+            min_shape_change=min_shape_change, min_area_gain=min_area_gain, max_no_changes=max_no_changes
         )
 
         # Yala Core attributes
@@ -66,8 +66,6 @@ class Yala(object):
 
         :param X:
         :param y:
-        :param eval_set:
-        :param sample_weight:
         :return:
         """
         # encode: X is a numpy/scipy array, y in numpy/scipy array
@@ -83,12 +81,12 @@ class Yala(object):
         else:
             raise NotImplementedError
 
-        refiner = Refiner(
-            self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing, n_update=self.n_update,
+        shaper = Shaper(
+            self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing,
             perf_plotter=kwargs.get('perf_plotter', None)
         )
 
-        expander = Expander(
+        cleaner = Cleaner(
             self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing,
             perf_plotter=kwargs.get('perf_plotter', None)
         )
@@ -97,42 +95,38 @@ class Yala(object):
             print("[YALA]: Iteration {}".format(i))
 
             # Initial sampling
-            component = init_sample(
-                self.n_parallel, self.init_level, self.server, self.encoder.bf_map, window_length=3
+            components = init_sample(
+                self.n_parallel, self.init_level, self.server, self.encoder.bf_map, window_length=7
             )
 
             # Instantiate tracking
             tracker = Tracker(
-                [d['id'] for d in component.partitions], tracker_params=self.tracker_params
+                [d['id'] for d in components.partitions], tracker_params=self.tracker_params,
+                n_features=self.encoder.bf_map.shape[1]
             )
 
             # Core loop
             i = 0
-            while len(component) > 0 and i < self.max_iter:
+            while len(components) > 0 and i < self.max_iter:
 
-                # Refine
-                component = refiner.prepare(component).drain_all().select()
-                refiner.reset()
+                # Alter shape
+                components = shaper.prepare(components).drain_all().select()
+                shaper.reset()
 
-                # Expand
-                component = expander.prepare(component).drain_all().select()
-                expander.reset()
+                # Clean shape
+                components = cleaner.prepare(components).drain_all().select()
+                cleaner.reset()
 
-                # Track metrics
-                component = tracker.pop_complete(component)
+                # Swap from compression to expansion & track metrics
+                components = tracker.swap_components(components)
                 i += 1
-
-                if component is None:
+                if components is None:
                     break
-
-            # TODO:
-            #   Introduce a dropout rate before, expander
-            #   Spend more time on expander true
 
             tracker.visualize_indicators()
             completes = tracker.get_complete_component()
             for comp in completes:
-                expander.visualize_fg(YalaBasePatterns.from_fg_comp(comp))
+                cleaner.visualize_fg(YalaBasePatterns.from_fg_comp(comp))
 
             if self.firing_graph is not None and completes:
                 self.firing_graph = self.firing_graph.augment_from_fg_comp(sum(completes, FgComponents.empty_comp()))
@@ -144,14 +138,3 @@ class Yala(object):
             self.server.pattern_backward = None
 
         return self
-
-    def predict_proba(self, X):
-
-        assert self.firing_graph is not None, "First fit firing graph"
-
-        sax_x = self.firing_graph.propagate(X)
-        ax_probas = self.d_merger['C=0.1,fit_intercept=True,penalty=l2'].predict_proba(sax_x.A)
-        return ax_probas[:, [1]]
-
-    def predict(self, X, n_label, min_probas=0.1):
-        pass

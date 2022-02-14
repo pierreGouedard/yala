@@ -87,7 +87,6 @@ class MultiEncoders():
         return self.transform(X, y)
 
     def fit(self, X, y):
-
         # Check whether X and y contain only numeric data
         assert X.dtype.kind in self._NUMERIC_KINDS, "X contains non num data, must contains only num data"
         assert y.dtype.kind in self._NUMERIC_KINDS, "y contains non num data, must contains only num data"
