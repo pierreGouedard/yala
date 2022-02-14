@@ -64,16 +64,10 @@ class FgComponents:
 
         return tmp
 
-    def complement(self, sax_mask=None):
-        sax_inputs = csc_matrix(self.inputs.A ^ ones(self.inputs.shape, dtype=bool))
-
-        if sax_mask is not None:
-            sax_inputs = sax_inputs.multiply(sax_mask)
-
-        return FgComponents(inputs=sax_inputs, partitions=copy(self.partitions), levels=self.levels.copy())
-
-    def copy(self):
-        return FgComponents(inputs=self.inputs.copy(), partitions=copy(self.partitions), levels=self.levels.copy())
+    def copy(self, **kwargs):
+        return FgComponents(**{
+            'inputs': self.inputs.copy(), 'partitions': copy(self.partitions), 'levels': self.levels.copy(), **kwargs
+        })
 
 
 @dataclass
@@ -100,7 +94,7 @@ class DrainerParameters:
 
 @dataclass
 class TrackerParameters:
-    min_precision_gain: float
-    min_size_gain: float
-    max_no_gain: int
+    min_shape_change: float
+    min_area_gain: float
+    max_no_changes: int
 
