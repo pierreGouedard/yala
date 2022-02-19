@@ -4,6 +4,7 @@ from itertools import groupby
 from firing_graph.solver.drainer import FiringGraphDrainer
 from scipy.sparse import diags
 from abc import abstractmethod
+from functools import lru_cache
 
 # Local import
 from src.model.helpers.data_models import FgComponents
@@ -13,20 +14,16 @@ from src.model.helpers.patterns import YalaBasePatterns, YalaTopPattern
 
 class YalaDrainer(FiringGraphDrainer):
     """Abstract child of Firing Graph specific to YALA algorithm."""
-    def __init__(
-            self, server, sax_bf_map, drainer_params, min_firing=100, pass_signal_to_builder=False
-    ):
+    def __init__(self, server, sax_bf_map, drainer_params, min_firing=100, level_delta=0):
         # Map bit to features and candidate features
         self.bf_map = sax_bf_map
-
-        # Option firing graph builder
-        self.pass_signal_to_builder = pass_signal_to_builder
 
         # Parameters for draining
         self.drainer_params = drainer_params
 
         # complement attributes
         self.min_firing = min_firing
+        self.level_delta = level_delta
 
         # Handy
         self.pre_draining_fg = None
@@ -40,16 +37,16 @@ class YalaDrainer(FiringGraphDrainer):
     def f2b(self, sax_x):
         return self.bf_map.dot(sax_x)
 
+    @lru_cache()
+    def get_card_features(self, n_repeat):
+        return self.bf_map.sum(axis=0).A[[0] * n_repeat, :]
+
     def prepare(self, component):
         # Get triplet signals
         sax_x, sax_y, sax_fg = self.get_triplet(component)
 
         # Build top and bottom patterns
-        d_signals = {}
-        if self.pass_signal_to_builder:
-            d_signals = {"x": sax_x, "y": sax_y, "fg": sax_fg}
-
-        self.build_patterns(component, **d_signals)
+        self.build_patterns(component, **{"x": sax_x, "y": sax_y, "fg": sax_fg})
 
         # Set drainer params & set weights
         self.setup_params(sax_y, sax_fg)
@@ -75,9 +72,7 @@ class YalaDrainer(FiringGraphDrainer):
         l_partitions = self.update_partition_metrics(sax_inputs)
 
         # Create component
-        fg_comp = FgComponents(
-            inputs=sax_inputs, partitions=l_partitions, levels=self.b2f(sax_inputs).A.sum(axis=1)
-        )
+        fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=self.b2f(sax_inputs).A.sum(axis=1))
 
         return fg_comp
 
@@ -87,7 +82,7 @@ class YalaDrainer(FiringGraphDrainer):
 
     def update_partition_metrics(self, sax_inputs):
         # Get support features
-        ax_bounds = self.b2f(sax_inputs.astype(int)).A
+        ax_bounds = self.b2f(sax_inputs).A
 
         # Compute metrics
         ax_areas = sax_inputs.sum(axis=0).A[0, :] / ax_bounds.sum(axis=1)
@@ -97,7 +92,7 @@ class YalaDrainer(FiringGraphDrainer):
                 **self.pre_draining_fg.partitions[i],
                 "precision": self.drainer_params.precisions[i],
                 "area": ax_areas[i],
-                'shape': ax_bounds[i]
+                'shape': ax_bounds[i].astype(int)
              }
             for i in range(sax_inputs.shape[1])
         ]
@@ -129,7 +124,8 @@ class YalaDrainer(FiringGraphDrainer):
         sax_y = self.server.next_backward(n=self.drainer_params.batch_size, update_step=False).sax_data_backward
 
         # propagate through firing graph
-        sax_fg = YalaBasePatterns.from_fg_comp(component).propagate(sax_x)
+        sax_fg = YalaBasePatterns.from_fg_comp(component.copy(levels=component.levels - self.level_delta))\
+            .propagate(sax_x)
 
         return sax_x, sax_y, sax_fg
 

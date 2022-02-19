@@ -14,12 +14,10 @@ class Cleaner(Visualizer):
     """Expander"""
     def __init__(
             self, server, sax_bf_map, drainer_params, min_firing=100, n_min_bounds=3, perf_plotter=None,
-            plot_perf_enabled=True, advanced_plot_perf_enabled=True
     ):
         # call parent constructor
         self.n_min_bounds = n_min_bounds
-        self.advanced_plot_perf_enabled = advanced_plot_perf_enabled
-        super().__init__(server, sax_bf_map, drainer_params, min_firing, perf_plotter, plot_perf_enabled)
+        super().__init__(server, sax_bf_map, drainer_params, min_firing, level_delta=1, perf_plotter=perf_plotter)
 
     def select_support_bits(self, sax_drained_weights, sax_count_activations):
         # Get selected bits keep if support
@@ -39,30 +37,52 @@ class Cleaner(Visualizer):
 
         # Keep a minimum number of bounds
         ax_sampled = sample_from_mask(
-            ax_card_signal > 0 & ~ax_mask_selected, ax_n=min(self.n_min_bounds - ax_mask_selected.sum(axis=1))
+            ax_card_signal > 0 & ~ax_mask_selected,
+            ax_n=np.maximum(self.n_min_bounds - ax_mask_selected.sum(axis=1), 0)
         )
         ax_mask_selected |= ax_sampled
 
-        # Compute new inputs and metrics
-        sax_support_bits = self.pre_draining_fg.I.multiply(self.f2b(csc_matrix(ax_mask_selected.T)))
+        # Build support inputs
+        sax_support_bits = (sax_active_inputs + self.pre_draining_fg.I).multiply(
+            self.f2b(csc_matrix(ax_mask_selected.T))
+        )
+
+        # Now if any ax_mask_altered => keep mask
+        sax_support_bits += self.pre_draining_fg.I
+
+        # Keep only selected bounds
+        sax_support_bits = sax_support_bits.multiply(self.f2b(csc_matrix(ax_mask_selected.T)))
 
         return sax_support_bits
 
-    def build_patterns(self, component, **kwargs):
+    def build_patterns(self, component, **d_signals):
+
+        # Build convex hull
+        sax_hull_inputs = self.build_convex_hull(component, d_signals['x'], d_signals['fg'])
+
         # Build components
-        fg_comp, mask_comp = self.build_components(component)
+        fg_comp, mask_comp = self.build_components(component, sax_hull_inputs)
 
         # Create mask pattern from comp
         self.fg_mask = YalaBasePatterns.from_fg_comp(mask_comp)
         self.firing_graph = YalaBasePatterns.from_fg_comp(fg_comp)
         self.pre_draining_fg = YalaBasePatterns.from_fg_comp(component)
 
-    def build_components(self, comp):
+    def build_components(self, comp, sax_hull_inputs):
         fg_comp = FgComponents(
-            inputs=csc_matrix(comp.inputs.A ^ self.f2b(self.b2f(comp.inputs).T).A),
+            inputs=csc_matrix(comp.inputs.A ^ self.f2b(self.b2f(comp.inputs).T).A).multiply(sax_hull_inputs),
             partitions=copy(comp.partitions), levels=np.ones(len(comp))
         )
 
         return fg_comp, comp.copy(levels=copy(comp.levels) - 1)
 
+    def build_convex_hull(self, component, sax_x, sax_fg):
+        # Get masked activations
+        sax_product = sax_x.astype(bool).T.dot(sax_fg)
+
+        # Compute feature masks
+        ax_card, ax_mask_component = self.b2f(sax_product.astype(int)).A, self.b2f(component.inputs.astype(bool)).A
+        ax_mask = (0 < ax_card) & (ax_card < self.get_card_features(ax_card.shape[0])) & ax_mask_component
+
+        return sax_product.multiply(self.f2b(csc_matrix(ax_mask.T)))
 
