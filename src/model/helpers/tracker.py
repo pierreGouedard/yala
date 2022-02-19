@@ -6,8 +6,8 @@ from copy import deepcopy as copy
 # Local import
 
 
-class Tracker():
-    tracking_infos = ['shape', 'area', 'n_no_gain']
+class Tracker:
+    tracking_infos = ['shape', 'area', 'n_no_changes']
     swap = {"compress": "expand", 'expand': 'compress'}
 
     def __init__(self, l_ids, tracker_params, n_features, min_area=1):
@@ -40,7 +40,8 @@ class Tracker():
             shape_change = abs(d_new['shape'] - d_prev.get('shape', np.zeros(self.n_features))).sum()
 
             if self.swap_criterion(area_change, shape_change):
-                if d_prev['n_no_changes'] + 1 > self.tracker_params.max_no_changes:
+                d_new['n_no_changes'] = d_prev.get('n_no_changes', 0) + 1
+                if d_prev.get('n_no_changes', 0) + 1 > self.tracker_params.max_no_changes:
                     components.partitions[i]['stage'] = 'done'
 
             self.update_tracker(d_new["id"], {k: d_new.get(k, d_prev.get(k, 0)) for k in self.tracking_infos})

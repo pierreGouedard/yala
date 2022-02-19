@@ -11,8 +11,8 @@ from src.model.helpers.operations.drainer import YalaDrainer
 class Visualizer(YalaDrainer):
     """Visual"""
     def __init__(
-            self, server, sax_bf_map, drainer_params, min_firing=100, perf_plotter=None, plot_perf_enabled=True,
-            advanced_plot_perf_enabled=True, pass_signal_to_builder=False
+            self, server, sax_bf_map, drainer_params, min_firing=100, level_delta=0, perf_plotter=None,
+            plot_perf_enabled=False, advanced_plot_perf_enabled=False
     ):
         # Get visualisation parameters
         self.perf_plotter = perf_plotter
@@ -20,12 +20,9 @@ class Visualizer(YalaDrainer):
         self.advanced_plot_perf_enabled = advanced_plot_perf_enabled
 
         # Call parent constructor
-        super().__init__(
-            server, sax_bf_map, drainer_params, min_firing, pass_signal_to_builder=pass_signal_to_builder
-        )
+        super().__init__(server, sax_bf_map, drainer_params, min_firing, level_delta=level_delta)
 
     def select(self):
-        print(type(self).__name__)
         fg_comp = YalaDrainer.select(self)
         print(fg_comp.partitions)
 
@@ -92,12 +89,12 @@ class Visualizer(YalaDrainer):
                     fg_search_space, fg_ori_bounds, fg_new_bounds,
                     {
                         "v_ind": i, "f_ind": ind, "is_support": ax_selection_mask[i, ind],
-                        'stage': self.pre_draining_fg.partitions[i]['stage']
+                        'stage': type(self).__name__
                     }
                 )
 
     def visualize_selection(self, fg_search_space, fg_ori_bounds, fg_new_bounds, d_info):
-
+        print()
         # Get signals
         sax_x = self.server.get_sub_forward(self.perf_plotter.indices)
         ax_search_space = fg_search_space.propagate(sax_x).A[:, 0]
@@ -107,7 +104,7 @@ class Visualizer(YalaDrainer):
         # Plot perf viz
         plt.suptitle(f"""
             Figure of {d_info['stage']} of vertex {d_info['v_ind']} feature {d_info['f_ind']}: 
-            support = {d_info['is_support']}
+            support = {d_info['is_support']} 
         """)
 
         plt.scatter(

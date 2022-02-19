@@ -119,7 +119,22 @@ class Yala(object):
 
                 # Swap from compression to expansion & track metrics
                 components = tracker.swap_components(components)
+
+                if i % 5 == 0:
+                    tracker.visualize_indicators()
+                    if components is not None:
+                        cleaner.visualize_fg(YalaBasePatterns.from_fg_comp(components))
+                    resp = input('activate viz')
+
+                    if resp == "yes":
+                        shaper.plot_perf_enabled = True
+                        shaper.advanced_plot_perf_enabled = True
+                        cleaner.plot_perf_enabled = True
+                        cleaner.advanced_plot_perf_enabled = True
+
+
                 i += 1
+
                 if components is None:
                     break
 

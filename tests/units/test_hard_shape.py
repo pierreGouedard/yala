@@ -15,12 +15,12 @@ class TestHardShape(unittest.TestCase):
         'batch_size': 5000, 'min_firing': 100, 'dropout_rate_mask': 0.99, 'n_run': 100, 'n_bin': 50,
         'bin_method': 'quantile', 'bin_missing': False
     }
-    n_shape = 2
+    n_shape = 1
     type_basis = 'circle'
     shape = 'circle'
 
     def setUp(self):
-        np.random.seed(123)
+        np.random.seed(1234)
 
         # Create datasets
         self.origin_features = np.random.randn(20000, 2)
@@ -42,10 +42,10 @@ class TestHardShape(unittest.TestCase):
 
     def setup_circle_shape(self):
         # Create datasets
-        l_norm = [multivariate_normal(mean=np.random.randn(2), cov=np.eye(2)) for _ in range(self.n_shape)]
+        l_norm = [multivariate_normal(mean=np.random.randn(2) * 0, cov=np.eye(2)) for _ in range(self.n_shape)]
 
         # Compute labels
-        self.ctargets = np.array([max([m.pdf(x) for m in l_norm]) > 0.08 for x in self.origin_features])
+        self.ctargets = np.array([max([m.pdf(x) for m in l_norm]) > 0.10 for x in self.origin_features])
 
     def setup_square_shape(self):
         l_centers = [(np.random.randn(2), abs(np.random.randn())) for _ in range(self.n_shape)]
