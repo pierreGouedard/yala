@@ -124,24 +124,25 @@ class Yala(object):
                     tracker.visualize_indicators()
                     if components is not None:
                         cleaner.visualize_fg(YalaBasePatterns.from_fg_comp(components))
-                    resp = input('activate viz')
+                    resp = input('would you like to activate visualisation now ?')
 
                     if resp == "yes":
                         shaper.plot_perf_enabled = True
                         shaper.advanced_plot_perf_enabled = True
                         cleaner.plot_perf_enabled = True
                         cleaner.advanced_plot_perf_enabled = True
-
-
                 i += 1
 
                 if components is None:
                     break
 
             tracker.visualize_indicators()
-            completes = tracker.get_complete_component()
+            completes = tracker.components
             for comp in completes:
                 cleaner.visualize_fg(YalaBasePatterns.from_fg_comp(comp))
+
+            import IPython
+            IPython.embed()
 
             if self.firing_graph is not None and completes:
                 self.firing_graph = self.firing_graph.augment_from_fg_comp(sum(completes, FgComponents.empty_comp()))
