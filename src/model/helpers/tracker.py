@@ -4,6 +4,7 @@ import numpy as np
 from copy import deepcopy as copy
 
 # Local import
+from src.model.helpers.data_models import FgComponents
 
 
 class Tracker:
@@ -15,6 +16,7 @@ class Tracker:
         self.n_features = n_features
         self.min_area = min_area
         self.tracker_params = tracker_params
+        self.components = FgComponents.empty_comp()
 
         # Attributes init
         self.indicator = {nid: [] for nid in l_ids}
@@ -54,6 +56,8 @@ class Tracker:
             if comp.partitions[0]['stage'] == 'done':
                 components.pop(i)
                 stop = i >= len(components)
+                self.components += comp
+                print(self.components)
                 continue
 
             i += 1
@@ -78,6 +82,3 @@ class Tracker:
             axe_size.legend()
 
         plt.show()
-
-    def get_complete_component(self):
-        return [v[-1] for k, v in self.indicator.items() if v]
