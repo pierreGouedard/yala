@@ -94,7 +94,6 @@ class DrainerParameters:
 
 @dataclass
 class TrackerParameters:
-    min_shape_change: float
-    min_area_gain: float
+    min_delta_area: float
     max_no_changes: int
 

@@ -8,7 +8,7 @@ from src.model.helpers.data_models import FgComponents
 
 
 class Tracker:
-    tracking_infos = ['shape', 'area', 'n_no_changes']
+    tracking_infos = ['area', 'max_no_gain']
     swap = {"compress": "expand", 'expand': 'compress'}
 
     def __init__(self, l_ids, tracker_params, n_features, min_area=1):
@@ -25,9 +25,6 @@ class Tracker:
         self.indicator[nid].append(d_new)
         return self
 
-    def swap_criterion(self, area_change, shape_change):
-        return area_change < self.tracker_params.min_area_gain and shape_change < self.tracker_params.min_shape_change
-
     def swap_components(self, components):
         for i, sub_comp in enumerate(components):
             d_new = sub_comp.partitions[0]
@@ -38,13 +35,14 @@ class Tracker:
                 continue
 
             # Test whether the min precision and size gain is reached
-            area_change = abs(d_new['area'] - d_prev.get('area', 0)) / d_prev.get('area', 1e-6)
-            shape_change = abs(d_new['shape'] - d_prev.get('shape', np.zeros(self.n_features))).sum()
+            delta_area = abs(d_new['area'] - d_prev.get('area', 0)) / d_prev.get('area', 1e-6)
 
-            if self.swap_criterion(area_change, shape_change):
+            if delta_area < self.tracker_params.min_delta_area:
                 d_new['n_no_changes'] = d_prev.get('n_no_changes', 0) + 1
                 if d_prev.get('n_no_changes', 0) + 1 > self.tracker_params.max_no_changes:
                     components.partitions[i]['stage'] = 'done'
+            else:
+                d_new['n_no_changes'] = 0
 
             self.update_tracker(d_new["id"], {k: d_new.get(k, d_prev.get(k, 0)) for k in self.tracking_infos})
 
