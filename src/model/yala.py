@@ -24,8 +24,7 @@ class Yala(object):
                  n_update=1,
                  dropout_rate_mask=0.2,
                  min_firing=10,
-                 min_shape_change=1,
-                 min_area_gain=0.05,
+                 min_delta_area=0.05,
                  max_no_changes=3,
                  server_type='unclassified',
                  n_bin=10,
@@ -50,15 +49,10 @@ class Yala(object):
         self.drainer_params = DrainerParameters(total_size=draining_size, batch_size=batch_size, margin=draining_margin)
 
         # Tracker params
-        self.tracker_params = TrackerParameters(
-            min_shape_change=min_shape_change, min_area_gain=min_area_gain, max_no_changes=max_no_changes
-        )
+        self.tracker_params = TrackerParameters(min_delta_area=min_delta_area, max_no_changes=max_no_changes)
 
         # Yala Core attributes
         self.firing_graph = None
-
-        # TODO: test / temp
-        self.d_merger = {}
 
     def fit(self, X, y, **kwargs):
         """
@@ -140,17 +134,5 @@ class Yala(object):
             completes = tracker.components
             for comp in completes:
                 cleaner.visualize_fg(YalaBasePatterns.from_fg_comp(comp))
-
-            import IPython
-            IPython.embed()
-
-            if self.firing_graph is not None and completes:
-                self.firing_graph = self.firing_graph.augment_from_fg_comp(sum(completes, FgComponents.empty_comp()))
-
-            elif completes:
-                self.firing_graph = YalaBasePatterns.from_fg_comp(sum(completes, FgComponents.empty_comp()))
-
-            self.server.sax_mask_forward = None
-            self.server.pattern_backward = None
 
         return self

@@ -46,7 +46,7 @@ class Shaper(Visualizer):
 
     def build_patterns(self, component, **d_signals):
         # Build convex hull
-        sax_ch_inputs = self.build_random_convex_hull(component, d_signals['x'], d_signals['fg'])
+        sax_ch_inputs = self.build_random_hull(component, d_signals['x'], d_signals['fg'])
 
         # Build components
         fg_comp, mask_comp = self.build_components(component, sax_ch_inputs)
@@ -74,7 +74,7 @@ class Shaper(Visualizer):
 
         return cmp.copy(inputs=csc_matrix(ax_reduced_inputs), levels=np.ones(len(cmp))), cmp
 
-    def build_random_convex_hull(self, component, sax_x, sax_fg):
+    def build_random_hull(self, component, sax_x, sax_fg):
         # Get masked activations
         sax_product = sax_x.astype(bool).T.dot(sax_fg)
 

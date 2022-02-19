@@ -81,19 +81,11 @@ class YalaDrainer(FiringGraphDrainer):
         pass
 
     def update_partition_metrics(self, sax_inputs):
-        # Get support features
-        ax_bounds = self.b2f(sax_inputs).A
-
         # Compute metrics
-        ax_areas = sax_inputs.sum(axis=0).A[0, :] / ax_bounds.sum(axis=1)
+        ax_areas = sax_inputs.sum(axis=0).A[0, :] / self.b2f(sax_inputs).A.sum(axis=1)
 
         l_metrics = [
-            {
-                **self.pre_draining_fg.partitions[i],
-                "precision": self.drainer_params.precisions[i],
-                "area": ax_areas[i],
-                'shape': ax_bounds[i].astype(int)
-             }
+            {**self.pre_draining_fg.partitions[i], "precision": self.drainer_params.precisions[i], "area": ax_areas[i]}
             for i in range(sax_inputs.shape[1])
         ]
         return l_metrics
