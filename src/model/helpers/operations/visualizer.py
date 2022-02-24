@@ -24,7 +24,6 @@ class Visualizer(YalaDrainer):
 
     def select(self):
         fg_comp = YalaDrainer.select(self)
-        print(fg_comp.partitions)
 
         if self.plot_perf_enabled:
             self.visualize_fg(YalaBasePatterns.from_fg_comp(fg_comp))

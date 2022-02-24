@@ -89,7 +89,7 @@ class Yala(object):
             print("[YALA]: Iteration {}".format(i))
 
             # Initial sampling
-            components = init_sample(
+            components, shaper_probas = init_sample(
                 self.n_parallel, self.init_level, self.server, self.encoder.bf_map, window_length=7
             )
 
@@ -104,11 +104,12 @@ class Yala(object):
             while len(components) > 0 and i < self.max_iter:
 
                 # Alter shape
-                components = shaper.prepare(components).drain_all().select()
+                components = shaper.prepare(components, shaper_probas=shaper_probas).drain_all().select()
                 shaper.reset()
 
                 # Clean shape
                 components = cleaner.prepare(components).drain_all().select()
+                shaper_probas.add(cleaner.ax_cleaned_features)
                 cleaner.reset()
 
                 # Swap from compression to expansion & track metrics
