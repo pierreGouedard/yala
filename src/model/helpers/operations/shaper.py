@@ -6,7 +6,7 @@ from scipy.signal import convolve2d
 # Local import
 from src.model.helpers.patterns import YalaBasePatterns
 from src.model.helpers.operations.visualizer import Visualizer
-from src.model.utils import sample_from_mask
+from src.model.utils import sample_from_proba
 
 
 class Shaper(Visualizer):
@@ -35,8 +35,10 @@ class Shaper(Visualizer):
         sax_support_bits = (sax_active_inputs + self.pre_draining_fg.I).multiply(
             self.f2b(csc_matrix(ax_mask_selected.T))
         )
-        # Add bounds used as mask
-        sax_support_bits += self.fg_mask.I
+
+        # Mask's bound that have not been selected
+        sax_mask_mask = self.f2b(csc_matrix(self.b2f(self.fg_mask.I).A ^ ax_mask_selected, dtype=bool).T)
+        sax_support_bits += self.fg_mask.I.multiply(sax_mask_mask)
 
         # Visualize result of shaper
         if self.advanced_plot_perf_enabled:
@@ -44,9 +46,9 @@ class Shaper(Visualizer):
 
         return sax_support_bits
 
-    def build_patterns(self, component, **d_signals):
+    def build_patterns(self, component, **kwargs):
         # Build convex hull
-        sax_ch_inputs = self.build_random_hull(component, d_signals['x'], d_signals['fg'])
+        sax_ch_inputs = self.build_random_hull(component, kwargs['x'], kwargs['fg'], kwargs['shaper_probas'])
 
         # Build components
         fg_comp, mask_comp = self.build_components(component, sax_ch_inputs)
@@ -74,7 +76,7 @@ class Shaper(Visualizer):
 
         return cmp.copy(inputs=csc_matrix(ax_reduced_inputs), levels=np.ones(len(cmp))), cmp
 
-    def build_random_hull(self, component, sax_x, sax_fg):
+    def build_random_hull(self, component, sax_x, sax_fg, shaper_probas):
         # Get masked activations
         sax_product = sax_x.astype(bool).T.dot(sax_fg)
 
@@ -82,7 +84,10 @@ class Shaper(Visualizer):
         ax_card, ax_mask_component = self.b2f(sax_product.astype(int)).A, self.b2f(component.inputs.astype(bool)).A
         ax_card_mask = (0 < ax_card) & (ax_card < self.get_card_features(ax_card.shape[0]))
 
+        # Get proba
+        ax_p = shaper_probas.probas.T * ax_card_mask
+
         # Select randomly n_convex_bounds that are not masked
-        sax_sampled = csc_matrix(sample_from_mask(ax_card_mask & ~ax_mask_component, n=self.n_convex_bounds).T)
+        sax_sampled = csc_matrix(sample_from_proba(ax_p / ax_p.sum(axis=1), n=self.n_convex_bounds).T)
 
         return sax_product.multiply(self.f2b(sax_sampled))

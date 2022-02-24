@@ -64,19 +64,12 @@ class Tracker:
         return components
 
     def visualize_indicators(self):
-        fig, (axe_prec, axe_size) = plt.subplots(1, 2)
-        fig.suptitle(f'Metrics tracker viz')
-
         # Plot for each node
         for k, v in self.indicator.items():
             ax_x = np.arange(len(v))
-            ax_precs, ax_sizes = np.array([d["shape"].sum() for d in v]), np.array([d["area"] for d in v])
+            ax_areas = np.array([d["area"] for d in v])
+            plt.plot(ax_x, ax_areas, label=f"vertex {k}")
 
-            # Plot
-            axe_prec.plot(ax_x, ax_precs, label=f"vertex {k}")
-            axe_size.plot(ax_x, ax_sizes, label=f"vertex {k}")
-
-            axe_prec.legend()
-            axe_size.legend()
-
+        plt.legend()
+        plt.title(f'Metrics tracker viz')
         plt.show()

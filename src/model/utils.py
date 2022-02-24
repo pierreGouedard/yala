@@ -6,10 +6,10 @@ from scipy.signal import convolve2d
 from scipy.sparse import csc_matrix
 
 # Local import
-from src.model.helpers.data_models import DrainerFeedbacks, FgComponents
+from src.model.helpers.data_models import DrainerFeedbacks, FgComponents, ShaperProba
 
 
-def init_sample(n, l, server, sax_bf_map, window_length):
+def init_sample(n, l, server, sax_bf_map, window_length, support_proba=0.2):
 
     # Get dimensions
     (n_inputs, n_features) = sax_bf_map.shape
@@ -27,12 +27,39 @@ def init_sample(n, l, server, sax_bf_map, window_length):
     bottom_comp = FgComponents(
         inputs=csc_matrix(ax_inputs), levels=(ax_inputs.T.dot(sax_bf_map.A) > 0).sum(axis=1),
         partitions=[
-            {'label_id': 0, 'id': ''.join(choices(ascii_uppercase, k=5)), "stage": "ongoing"} for _ in range(n)],
+            {'label_id': 0, 'id': ''.join(choices(ascii_uppercase, k=5)), "stage": "ongoing"} for _ in range(n)
+        ],
     )
-    return bottom_comp
+
+    # Init Shaper probabilities
+    shaper_proba = ShaperProba(dim=ax_mask.shape, support_proba=support_proba).set_probas(ax_mask)
+    return bottom_comp, shaper_proba
 
 
-def sample_from_mask(ax_mask, n=None, ax_n=None):
+def sample_from_proba(ax_p, n=None, ax_n=None):
+    if ax_n is None:
+        ax_n = np.ones(ax_p.shape[0], dtype=int) * n
+
+    # Prepare choice
+    (ny, nx), ax_linear = ax_p.shape, np.arange(ax_p.shape[1])
+    ax_counts = np.minimum((ax_p > 0).sum(axis=1), ax_n) * ((ax_p > 0).sum(axis=1) >= ax_n)
+
+    def masked_choice(ax_p_, n_):
+        return list(np.random.choice(ax_linear, n_, replace=False, p=ax_p_))
+
+    # Random coordinate choice
+    l_y_ind = sum([[i] * ax_counts[i] for i in range(ny)], [])
+    l_x_ind = sum([masked_choice(ax_p[i, :], ax_counts[i]) for i in range(ny)], [])
+
+    # Create new mask features
+    ax_mask_sampled = np.zeros((ny, nx), dtype=bool)
+    if l_y_ind:
+        ax_mask_sampled[l_y_ind, l_x_ind] = True
+
+    return ax_mask_sampled
+
+
+def sample_from_mask(ax_mask, n=None, ax_n=None, ax_p=None):
     if ax_n is None:
         ax_n = np.ones(ax_mask.shape[0], dtype=int) * n
 

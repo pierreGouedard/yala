@@ -41,12 +41,12 @@ class YalaDrainer(FiringGraphDrainer):
     def get_card_features(self, n_repeat):
         return self.bf_map.sum(axis=0).A[[0] * n_repeat, :]
 
-    def prepare(self, component):
+    def prepare(self, component, **kwargs):
         # Get triplet signals
         sax_x, sax_y, sax_fg = self.get_triplet(component)
 
         # Build top and bottom patterns
-        self.build_patterns(component, **{"x": sax_x, "y": sax_y, "fg": sax_fg})
+        self.build_patterns(component, **{"x": sax_x, "y": sax_y, "fg": sax_fg, **kwargs})
 
         # Set drainer params & set weights
         self.setup_params(sax_y, sax_fg)
@@ -73,7 +73,6 @@ class YalaDrainer(FiringGraphDrainer):
 
         # Create component
         fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=self.b2f(sax_inputs).A.sum(axis=1))
-
         return fg_comp
 
     @abstractmethod
@@ -82,7 +81,7 @@ class YalaDrainer(FiringGraphDrainer):
 
     def update_partition_metrics(self, sax_inputs):
         # Compute metrics
-        ax_areas = sax_inputs.sum(axis=0).A[0, :] / self.b2f(sax_inputs).A.sum(axis=1)
+        ax_areas = sax_inputs.sum(axis=0).A[0, :] / (self.b2f(sax_inputs).A.sum(axis=1) + 1e-6)
 
         l_metrics = [
             {**self.pre_draining_fg.partitions[i], "precision": self.drainer_params.precisions[i], "area": ax_areas[i]}

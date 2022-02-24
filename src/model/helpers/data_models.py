@@ -1,12 +1,13 @@
 """All classes that specify data structures."""
 # Global import
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
-from numpy import array, empty, hstack, ones
+from numpy import array, empty, hstack, ones, maximum
 from scipy.sparse import spmatrix, csc_matrix, hstack as sphstack
 from copy import deepcopy as copy
 
 # Local import
+
 
 @dataclass
 class FgComponents:
@@ -68,6 +69,40 @@ class FgComponents:
         return FgComponents(**{
             'inputs': self.inputs.copy(), 'partitions': copy(self.partitions), 'levels': self.levels.copy(), **kwargs
         })
+
+
+@dataclass
+class ShaperProba:
+    dim: Tuple[int, int]
+    support_proba: float
+    counts: Optional[array] = None
+    probas: Optional[array] = None
+
+    def set_probas(self, ax_support_mask):
+        if self.counts is None:
+            self.counts = ones(self.dim)
+
+        ax_p = ax_support_mask * self.support_proba + (~ax_support_mask * 1. / self.counts)
+        self.probas = ax_p / ax_p.sum(axis=0)
+
+        return self
+
+    def add(self, ax_support_mask: array):
+        import IPython
+        IPython.embed()
+        if self.counts is None:
+            self.counts = ones(self.dim) + ax_support_mask
+        else:
+            self.counts += ax_support_mask
+
+        return self
+
+    def remove(self, ax_support_mask: array):
+        if self.counts is None:
+            self.counts = ones(self.dim)
+        else:
+            self.counts -= ax_support_mask
+        return self
 
 
 @dataclass
