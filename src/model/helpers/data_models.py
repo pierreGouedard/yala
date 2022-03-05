@@ -88,20 +88,11 @@ class ShaperProba:
         return self
 
     def add(self, ax_support_mask: array):
-        import IPython
-        IPython.embed()
         if self.counts is None:
             self.counts = ones(self.dim) + ax_support_mask
         else:
             self.counts += ax_support_mask
 
-        return self
-
-    def remove(self, ax_support_mask: array):
-        if self.counts is None:
-            self.counts = ones(self.dim)
-        else:
-            self.counts -= ax_support_mask
         return self
 
 
