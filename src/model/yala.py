@@ -109,7 +109,7 @@ class Yala(object):
 
                 # Clean shape
                 components = cleaner.prepare(components).drain_all().select()
-                shaper_probas.add(cleaner.ax_cleaned_features)
+                shaper_probas.add(cleaner.ax_cleaned_features).set_probas(cleaner.b2f(components.inputs).A.T)
                 cleaner.reset()
 
                 # Swap from compression to expansion & track metrics

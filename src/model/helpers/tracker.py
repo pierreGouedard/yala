@@ -8,7 +8,7 @@ from src.model.helpers.data_models import FgComponents
 
 
 class Tracker:
-    tracking_infos = ['area', 'max_no_gain']
+    tracking_infos = ['area', 'n_no_changes']
     swap = {"compress": "expand", 'expand': 'compress'}
 
     def __init__(self, l_ids, tracker_params, n_features, min_area=1):
@@ -36,7 +36,6 @@ class Tracker:
 
             # Test whether the min precision and size gain is reached
             delta_area = abs(d_new['area'] - d_prev.get('area', 0)) / d_prev.get('area', 1e-6)
-
             if delta_area < self.tracker_params.min_delta_area:
                 d_new['n_no_changes'] = d_prev.get('n_no_changes', 0) + 1
                 if d_prev.get('n_no_changes', 0) + 1 > self.tracker_params.max_no_changes:
