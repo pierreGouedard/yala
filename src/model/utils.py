@@ -6,7 +6,7 @@ from scipy.signal import convolve2d
 from scipy.sparse import csc_matrix
 
 # Local import
-from src.model.helpers.data_models import DrainerFeedbacks, FgComponents, ShaperProba
+from src.model.core.data_models import DrainerFeedbacks, FgComponents, ShaperProba
 
 
 def init_sample(n, l, server, sax_bf_map, window_length, support_proba=0.2):

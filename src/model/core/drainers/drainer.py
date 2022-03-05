@@ -7,9 +7,9 @@ from abc import abstractmethod
 from functools import lru_cache
 
 # Local import
-from src.model.helpers.data_models import FgComponents
+from src.model.core.data_models import FgComponents
 from src.model.utils import init_parameters
-from src.model.helpers.patterns import YalaBasePatterns, YalaTopPattern
+from src.model.core.patterns import YalaBasePatterns, YalaTopPattern
 
 
 class YalaDrainer(FiringGraphDrainer):

@@ -3,9 +3,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 # Local import
-from src.model.helpers.patterns import YalaBasePatterns
-from src.model.helpers.data_models import FgComponents
-from src.model.helpers.operations.drainer import YalaDrainer
+from src.model.core.patterns import YalaBasePatterns
+from src.model.core.data_models import FgComponents
+from src.model.core.drainers.drainer import YalaDrainer
 
 
 class Visualizer(YalaDrainer):

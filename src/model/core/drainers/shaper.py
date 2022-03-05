@@ -4,8 +4,8 @@ from scipy.sparse import csc_matrix, diags
 from scipy.signal import convolve2d
 
 # Local import
-from src.model.helpers.patterns import YalaBasePatterns
-from src.model.helpers.operations.visualizer import Visualizer
+from src.model.core.patterns import YalaBasePatterns
+from src.model.core.drainers.visualizer import Visualizer
 from src.model.utils import sample_from_proba
 
 
