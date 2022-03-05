@@ -5,9 +5,9 @@ from copy import deepcopy as copy
 
 # Local import
 from src.model.utils import sample_from_mask
-from src.model.helpers.patterns import YalaBasePatterns
-from src.model.helpers.data_models import FgComponents
-from src.model.helpers.operations.visualizer import Visualizer
+from src.model.core.patterns import YalaBasePatterns
+from src.model.core.data_models import FgComponents
+from src.model.core.drainers.visualizer import Visualizer
 
 
 class Cleaner(Visualizer):

@@ -1,14 +1,14 @@
 # Global import
 
 # Local import
-from src.model.helpers.patterns import YalaBasePatterns
-from src.model.helpers.server import YalaUnclassifiedServer, YalaMisclassifiedServer
-from src.model.helpers.data_models import DrainerParameters, TrackerParameters, FgComponents
+from src.model.core.patterns import YalaBasePatterns
+from src.model.core.server import YalaUnclassifiedServer, YalaMisclassifiedServer
+from src.model.core.data_models import DrainerParameters, TrackerParameters, FgComponents
 from src.model.utils import init_sample
-from src.model.helpers.encoder import MultiEncoders
-from src.model.helpers.operations.cleaner import Cleaner
-from src.model.helpers.operations.shaper import Shaper
-from src.model.helpers.tracker import Tracker
+from src.model.core.encoder import MultiEncoders
+from src.model.core.drainers.cleaner import Cleaner
+from src.model.core.drainers.shaper import Shaper
+from src.model.core.tracker import Tracker
 
 
 class Yala(object):
