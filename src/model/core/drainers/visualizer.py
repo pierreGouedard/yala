@@ -67,13 +67,13 @@ class Visualizer(YalaDrainer):
         # for each vertex / original support features
         mask_comp = FgComponents(inputs=self.fg_mask.I, partitions=self.fg_mask.partitions, levels=self.fg_mask.levels)
 
-        ax_feature_mask = self.b2f(self.pre_draining_fg.I).A
+        ax_feature_mask = self.b2f(self.pre_draining_inputs).A
         for i, sub_mask_comp in enumerate(mask_comp):
             fg_search_space = YalaBasePatterns.from_fg_comp(sub_mask_comp)
 
             for ind in ax_feature_mask[i, :].nonzero()[0]:
                 # Compute sub inputs for original / new bounds
-                sax_ori_sub_inputs = self.bf_map[:, ind].multiply(self.pre_draining_fg.I[:, i]).astype(int)
+                sax_ori_sub_inputs = self.bf_map[:, ind].multiply(self.pre_draining_inputs[:, i]).astype(int)
                 sax_new_sub_inputs = self.bf_map[:, ind].multiply(sax_new_inputs[:, i]).astype(int)
 
                 fg_ori_bounds = YalaBasePatterns.from_fg_comp(FgComponents(

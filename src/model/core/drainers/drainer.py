@@ -1,6 +1,5 @@
 # Global import
 from dataclasses import asdict
-from itertools import groupby
 from firing_graph.solver.drainer import FiringGraphDrainer
 from scipy.sparse import diags
 from abc import abstractmethod
@@ -26,7 +25,7 @@ class YalaDrainer(FiringGraphDrainer):
         self.level_delta = level_delta
 
         # Handy
-        self.pre_draining_fg = None
+        self.pre_draining_inputs = None
 
         # call parent constructor
         super().__init__(None, server, self.drainer_params.batch_size)
@@ -55,8 +54,9 @@ class YalaDrainer(FiringGraphDrainer):
 
     def drain_all(self, **kwargs):
         # Update top and backward pattern of server
-        gr = groupby([(p['label_id'], i) for i, p in enumerate(self.firing_graph.partitions)], key=lambda t: t[0])
-        self.server.pattern_backward = YalaTopPattern.from_mapping({k: list(map(lambda x: x[1], v)) for k, v in gr})
+        self.server.pattern_backward = YalaTopPattern(
+            self.server.n_label, [p['label_id'] for p in self.firing_graph.partitions]
+        )
 
         # Drain
         super().drain_all(n_max=self.drainer_params.total_size)
@@ -73,6 +73,7 @@ class YalaDrainer(FiringGraphDrainer):
 
         # Create component
         fg_comp = FgComponents(inputs=sax_inputs, partitions=l_partitions, levels=self.b2f(sax_inputs).A.sum(axis=1))
+
         return fg_comp
 
     @abstractmethod
@@ -84,7 +85,7 @@ class YalaDrainer(FiringGraphDrainer):
         ax_areas = sax_inputs.sum(axis=0).A[0, :] / (self.b2f(sax_inputs).A.sum(axis=1) + 1e-6)
 
         l_metrics = [
-            {**self.pre_draining_fg.partitions[i], "precision": self.drainer_params.precisions[i], "area": ax_areas[i]}
+            {**self.firing_graph.partitions[i], "precision": self.drainer_params.precisions[i], "area": ax_areas[i]}
             for i in range(sax_inputs.shape[1])
         ]
         return l_metrics
@@ -107,7 +108,7 @@ class YalaDrainer(FiringGraphDrainer):
 
     def reset(self):
         self.reset_all()
-        self.firing_graph, self.fg_mask = None, None
+        self.firing_graph, self.fg_mask, self.pre_draining_inputs = None, None, None
 
     def get_triplet(self, component):
         # Get masked activations
@@ -121,7 +122,10 @@ class YalaDrainer(FiringGraphDrainer):
         return sax_x, sax_y, sax_fg
 
     def setup_params(self, sax_y, sax_fg):
-        self.drainer_params.precisions = (sax_y.T.astype(int).dot(sax_fg) / (sax_fg.sum(axis=0) + 1e-6)).A[0]
+        # Get arg max as label, keep max precision
+        ax_precisions = (sax_y.T.astype(int).dot(sax_fg) / (sax_fg.sum(axis=0) + 1e-6)).A
+        ax_labels = ax_precisions.argmax(axis=0)
+        self.drainer_params.precisions = ax_precisions.max(axis=0)
 
         # Compute penalty / rewards
         self.drainer_params = init_parameters(self.drainer_params, self.min_firing)
@@ -133,6 +137,11 @@ class YalaDrainer(FiringGraphDrainer):
 
         # Update mask draining
         self.firing_graph.matrices['Im'] = self.firing_graph.I
+
+        # Update labels
+        self.firing_graph.partitions = [
+            {**d, 'label_id': ax_labels[i]} for i, d in enumerate(self.firing_graph.partitions)
+        ]
 
         # Update firing graph from parent
         self.reset_all()

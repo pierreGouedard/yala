@@ -28,11 +28,11 @@ class Shaper(Visualizer):
         ax_card_selected: np.ndarray = self.b2f(sax_active_inputs.astype(int)).A
         ax_card_signal: np.ndarray = self.b2f(sax_drained_inputs.astype(int)).A
 
-        # Identify bounds to remove
+        # Identify bounds to select
         ax_mask_selected = ax_card_selected < ax_card_signal
 
         # Build support inputs
-        sax_support_bits = (sax_active_inputs + self.pre_draining_fg.I).multiply(
+        sax_support_bits = (sax_active_inputs + self.pre_draining_inputs).multiply(
             self.f2b(csc_matrix(ax_mask_selected.T))
         )
 
@@ -43,7 +43,8 @@ class Shaper(Visualizer):
         # Visualize result of shaper
         if self.advanced_plot_perf_enabled:
             self.visualize_multi_selection(sax_active_inputs, ax_mask_selected)
-
+        import IPython
+        IPython.embed()
         return sax_support_bits
 
     def build_patterns(self, component, **kwargs):
@@ -52,12 +53,12 @@ class Shaper(Visualizer):
 
         # Build components
         fg_comp, mask_comp = self.build_components(component, sax_ch_inputs)
-        self.pre_draining_fg = YalaBasePatterns.from_fg_comp(fg_comp)
+        self.pre_draining_inputs = fg_comp.inputs.copy()
 
         # Build patterns
         self.fg_mask = YalaBasePatterns.from_fg_comp(mask_comp)
         self.firing_graph = YalaBasePatterns.from_fg_comp(fg_comp.copy(
-            inputs=csc_matrix(fg_comp.inputs.A ^ self.f2b(self.b2f(fg_comp.inputs).T).A).multiply(sax_ch_inputs)
+            inputs=csc_matrix((fg_comp.inputs.A ^ sax_ch_inputs.A))
         ))
 
     def build_components(self, cmp, sax_ch, reduce_factor=0.4):

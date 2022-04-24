@@ -1,5 +1,6 @@
 # Global imports
 import numpy as np
+from itertools import groupby
 from scipy.sparse import lil_matrix, hstack, eye
 
 # Local import
@@ -88,27 +89,31 @@ class YalaTopPattern(FiringGraph):
     track of the firing of vertices.
 
     """
-    def __init__(self, n_inputs, n_outputs, **kwargs):
+    def __init__(self, n_inputs, l_labels):
+        # Build sparse matrices
+        self.n_inputs, self.n_outputs = n_inputs, len(l_labels)
+        d_matrices, l_partitions = self.build(l_labels, self.n_inputs, self.n_outputs)
 
-        self.n_inputs, self.n_outputs = n_inputs, n_outputs
-        kwargs.update({'project': 'YalaTopPattern', 'depth': 2, 'ax_levels': np.ones(n_outputs)})
+        # Build kwargs
+        kwargs = {
+            'partitions': l_partitions, 'matrices': d_matrices, 'project': 'YalaTopPattern', 'depth': 2,
+            'ax_levels': np.ones(self.n_outputs)
+        }
 
         # Invoke parent constructor
         super(YalaTopPattern, self).__init__(**kwargs)
 
     @staticmethod
-    def from_mapping(d_lv_mapping):
+    def build(l_labels, n_inputs, n_outputs):
 
-        n_inputs, n_outputs = len(d_lv_mapping.keys()), sum([len(v) for v in d_lv_mapping.values()])
         d_matrices, l_partitions = create_empty_matrices(n_inputs, n_outputs, n_outputs), []
-
         d_matrices['Ow'] += eye(n_outputs, format='csc', dtype=int)
 
-        for k, v in d_lv_mapping.items():
-            d_matrices['Iw'][k, v],  = 1,
-            l_partitions.append({'indices': list(map(int, v)), 'index_input': int(k)})
+        # Build I and partitions
+        gr = groupby([(l, i) for i, l in enumerate(l_labels)], key=lambda t: t[0])
+        for k, v in gr:
+            l_inds = list(map(lambda x: x[1], v))
+            d_matrices['Iw'][int(k), l_inds] = 1
+            l_partitions.append({'indices': l_inds, 'index_input': int(k)})
 
-        return YalaTopPattern(n_inputs, n_outputs, **{'partitions': l_partitions, 'matrices': d_matrices})
-
-    def get_io_mapping(self):
-        return {p['index_input']: p['indices'] for p in self.partitions}
+        return d_matrices, l_partitions

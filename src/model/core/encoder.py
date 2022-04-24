@@ -114,7 +114,6 @@ class MultiEncoders():
 
         else:
             y = csc_matrix(y[:, np.newaxis] > 0)
-
         # Transform features
         if self.basis is not None:
             pass

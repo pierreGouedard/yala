@@ -44,16 +44,17 @@ class Cleaner(Visualizer):
         ax_mask_selected |= ax_sampled
 
         # Build support inputs
-        sax_support_bits = (sax_active_inputs + self.pre_draining_fg.I).multiply(
+        sax_support_bits = (sax_active_inputs + self.pre_draining_inputs).multiply(
             self.f2b(csc_matrix(ax_mask_selected.T))
-        ) + self.pre_draining_fg.I
+        ) + self.pre_draining_inputs
 
         # Keep only selected bounds
         sax_support_bits = sax_support_bits.multiply(self.f2b(csc_matrix(ax_mask_selected.T)))
 
         # Track cleaned features
         self.ax_cleaned_features = self.b2f(self.fg_mask.I).A.T ^ self.b2f(sax_support_bits).A.T
-
+        import IPython
+        IPython.embed()
         return sax_support_bits
 
     def reset(self):
@@ -66,11 +67,11 @@ class Cleaner(Visualizer):
 
         # Build components
         fg_comp, mask_comp = self.build_components(component, sax_hull_inputs)
+        self.pre_draining_inputs = component.inputs
 
         # Create mask pattern from comp
         self.fg_mask = YalaBasePatterns.from_fg_comp(mask_comp)
         self.firing_graph = YalaBasePatterns.from_fg_comp(fg_comp)
-        self.pre_draining_fg = YalaBasePatterns.from_fg_comp(component)
 
     def build_components(self, comp, sax_hull_inputs):
         fg_comp = FgComponents(
