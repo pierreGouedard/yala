@@ -67,10 +67,10 @@ class Yala(object):
 
         # Instantiate core components
         if self.server_type == 'unclassified':
-            self.server = YalaUnclassifiedServer(X_enc, y_enc[:, 1], dropout_rate_mask=self.dropout_rate_mask)\
+            self.server = YalaUnclassifiedServer(X_enc, y_enc, dropout_rate_mask=self.dropout_rate_mask)\
                 .stream_features()
         elif self.server_type == 'misclassified':
-            self.server = YalaMisclassifiedServer(X_enc, y_enc[:, 1], dropout_rate_mask=self.dropout_rate_mask)\
+            self.server = YalaMisclassifiedServer(X_enc, y_enc, dropout_rate_mask=self.dropout_rate_mask)\
                 .stream_features()
         else:
             raise NotImplementedError
@@ -84,7 +84,7 @@ class Yala(object):
             self.server, self.encoder.bf_map, self.drainer_params, min_firing=self.min_firing,
             perf_plotter=kwargs.get('perf_plotter', None)
         )
-
+        # TODO (multi class): should be ok, just implement changes in drainer.setup_params
         for i in range(self.n_run):
             print("[YALA]: Iteration {}".format(i))
 
