@@ -6,7 +6,7 @@ from scipy.signal import convolve2d
 from scipy.sparse import csc_matrix
 
 # Local import
-from src.model.core.data_models import DrainerFeedbacks, FgComponents, ShaperProba
+from src.model.core.data_models import DrainerFeedbacks, FgComponents
 
 
 def init_sample(n, l, server, sax_bf_map, window_length, support_proba=0.2):
@@ -32,9 +32,7 @@ def init_sample(n, l, server, sax_bf_map, window_length, support_proba=0.2):
         ],
     )
 
-    # Init Shaper probabilities
-    shaper_proba = ShaperProba(dim=ax_mask.shape, support_proba=support_proba).set_probas(ax_mask)
-    return comp, shaper_proba
+    return comp
 
 
 def init_parameters(drainer_params, min_firing):

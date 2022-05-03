@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 # Local import
-from src.model.core.patterns import YalaBasePatterns
+from src.model.core.firing_graph import YalaFiringGraph
 from src.model.core.data_models import FgComponents
 from src.model.core.drainers.drainer import YalaDrainer
 
@@ -11,7 +11,7 @@ from src.model.core.drainers.drainer import YalaDrainer
 class Visualizer(YalaDrainer):
     """Visual"""
     def __init__(
-            self, server, sax_bf_map, drainer_params, min_firing=100, level_delta=0, perf_plotter=None,
+            self, server, bitmap, drainer_params, min_firing=100, n_bounds=2, perf_plotter=None,
             plot_perf_enabled=False, advanced_plot_perf_enabled=False
     ):
         # Get visualisation parameters
@@ -20,13 +20,13 @@ class Visualizer(YalaDrainer):
         self.advanced_plot_perf_enabled = advanced_plot_perf_enabled
 
         # Call parent constructor
-        super().__init__(server, sax_bf_map, drainer_params, min_firing, level_delta=level_delta)
+        super().__init__(server, bitmap, drainer_params, min_firing, n_bounds)
 
     def select(self):
         fg_comp = YalaDrainer.select(self)
 
         if self.plot_perf_enabled:
-            self.visualize_fg(YalaBasePatterns.from_fg_comp(fg_comp))
+            self.visualize_fg(YalaFiringGraph.from_fg_comp(fg_comp))
 
         return fg_comp
 
@@ -67,19 +67,19 @@ class Visualizer(YalaDrainer):
         # for each vertex / original support features
         mask_comp = FgComponents(inputs=self.fg_mask.I, partitions=self.fg_mask.partitions, levels=self.fg_mask.levels)
 
-        ax_feature_mask = self.b2f(self.pre_draining_inputs).A
+        ax_feature_mask = self.bitmap.b2f(self.pre_draining_inputs).A
         for i, sub_mask_comp in enumerate(mask_comp):
-            fg_search_space = YalaBasePatterns.from_fg_comp(sub_mask_comp)
+            fg_search_space = YalaFiringGraph.from_fg_comp(sub_mask_comp)
 
             for ind in ax_feature_mask[i, :].nonzero()[0]:
                 # Compute sub inputs for original / new bounds
-                sax_ori_sub_inputs = self.bf_map[:, ind].multiply(self.pre_draining_inputs[:, i]).astype(int)
-                sax_new_sub_inputs = self.bf_map[:, ind].multiply(sax_new_inputs[:, i]).astype(int)
+                sax_ori_sub_inputs = self.bitmap.bf_map[:, ind].multiply(self.pre_draining_inputs[:, i]).astype(int)
+                sax_new_sub_inputs = self.bitmap.bf_map[:, ind].multiply(sax_new_inputs[:, i]).astype(int)
 
-                fg_ori_bounds = YalaBasePatterns.from_fg_comp(FgComponents(
+                fg_ori_bounds = YalaFiringGraph.from_fg_comp(FgComponents(
                     inputs=sax_ori_sub_inputs, partitions=[{'label': 0}], levels=np.array([1])
                 ))
-                fg_new_bounds = YalaBasePatterns.from_fg_comp(FgComponents(
+                fg_new_bounds = YalaFiringGraph.from_fg_comp(FgComponents(
                     inputs=sax_new_sub_inputs, partitions=[{'label': 0}], levels=np.array([1])
                 ))
 
@@ -93,7 +93,6 @@ class Visualizer(YalaDrainer):
                 )
 
     def visualize_selection(self, fg_search_space, fg_ori_bounds, fg_new_bounds, d_info):
-        print()
         # Get signals
         sax_x = self.server.get_sub_forward(self.perf_plotter.indices)
         ax_search_space = fg_search_space.propagate(sax_x).A[:, 0]

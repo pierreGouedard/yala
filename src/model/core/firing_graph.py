@@ -1,7 +1,7 @@
 # Global imports
 import numpy as np
 from itertools import groupby
-from scipy.sparse import lil_matrix, hstack, eye
+from scipy.sparse import lil_matrix, hstack, eye, spmatrix
 
 # Local import
 from firing_graph.data_structure.graph import FiringGraph
@@ -9,7 +9,7 @@ from firing_graph.data_structure.utils import create_empty_matrices, set_matrice
 from src.model.core.data_models import FgComponents
 
 
-class YalaBasePatterns(FiringGraph):
+class YalaFiringGraph(FiringGraph):
     """
     This class implement the main data structure used for fitting data. It is composed of weighted link in the form of
     scipy.sparse matrices and store complement information on vertices such as levels, mask for draining. It also keep
@@ -17,20 +17,15 @@ class YalaBasePatterns(FiringGraph):
 
     """
 
-    def __init__(self, n_vertex, **kwargs):
+    def __init__(self, **kwargs):
 
-        self.n_vertex = n_vertex
-        kwargs.update({'project': 'YalaBasePatterns', 'depth': 2})
+        kwargs.update({'project': 'YalaFiringGraph', 'depth': 2})
 
         # Invoke parent constructor
-        super(YalaBasePatterns, self).__init__(**kwargs)
+        super(YalaFiringGraph, self).__init__(**kwargs)
 
     @staticmethod
-    def from_dict(d_struct, **graph_kwargs):
-        return YalaBasePatterns(n_vertex=d_struct['n_vertex'], **graph_kwargs)
-
-    @staticmethod
-    def from_fg_comp(fg_comp):
+    def from_fg_comp(fg_comp: FgComponents):
 
         if len(fg_comp) == 0:
             return None
@@ -47,39 +42,22 @@ class YalaBasePatterns(FiringGraph):
         # Add firing graph kwargs
         kwargs = {'partitions': fg_comp.partitions, 'matrices': d_matrices, 'ax_levels': fg_comp.levels}
 
-        return YalaBasePatterns(d_matrices['Iw'].shape[1], **kwargs)
+        return YalaFiringGraph(**kwargs)
 
-    def augment_from_fg_comp(self, fg_comp):
-        if len(fg_comp) == 0:
-            return self
+    def get_convex_hull(self, server, n, mask=None):
+        # Get masked activations
+        sax_x = server.next_forward(n=n, update_step=False).sax_data_forward
 
-        return YalaBasePatterns.from_fg_comp(FgComponents(
-            inputs=hstack([self.I, fg_comp.inputs]), partitions=self.partitions + fg_comp.partitions,
-            levels=np.hstack((self.levels, fg_comp.levels))
-        ))
+        # propagate through firing graph
+        sax_fg = self.propagate(sax_x)
 
-    def reduce_output(self):
+        # Get masked activations
+        sax_product = sax_x.astype(bool).T.dot(sax_fg).astype(int)
 
-        # Get labels
-        l_labels = [p['label_id'] for p in self.partitions]
+        if mask is not None:
+            sax_product = sax_product * mask
 
-        # Map vertices to label output
-        sax_reducer = lil_matrix((self.n_vertex, max(l_labels) + 1))
-        sax_reducer[np.arange(self.n_vertex), l_labels] = 1
-        self.matrices['Ow'] = self.matrices['Ow'].dot(sax_reducer)
-
-        # reformat matrices
-        set_matrices_spec(self.matrices, write_mode=False)
-
-        return self
-
-    def copy(self):
-
-        d_graph = super(YalaBasePatterns, self).to_dict(deep_copy=True)
-        d_struct = {
-            'n_vertex': self.n_vertex,
-        }
-        return self.from_dict(d_struct, **{k: v for k, v in d_graph.items()})
+        return FgComponents(inputs=sax_product, levels=np.ones(sax_fg.shape[1]), partitions=self.partitions)
 
 
 class YalaTopPattern(FiringGraph):
