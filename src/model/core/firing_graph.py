@@ -24,6 +24,9 @@ class YalaFiringGraph(FiringGraph):
         # Invoke parent constructor
         super(YalaFiringGraph, self).__init__(**kwargs)
 
+    def to_comp(self):
+        return FgComponents(inputs=self.I.astype(int), levels=self.levels, partitions=self.partitions)
+
     @staticmethod
     def from_fg_comp(fg_comp: FgComponents):
 
