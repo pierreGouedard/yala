@@ -53,20 +53,8 @@ class YalaDrainer(FiringGraphDrainer):
 
         return self
 
-    def select(self, merge=False):
-        # Compute new inputs, levels and partitions
-        # TODO: get component drained + mask (or merge)
-        sax_inputs = self.select_support_bits(
-            self.firing_graph.Iw, self.firing_graph.backward_firing['i']
-        )
-        l_partitions = self.update_partition_metrics(sax_inputs)
-
-        # Create component
-        fg_comp = FgComponents(
-            inputs=sax_inputs, partitions=l_partitions, levels=self.bitmap.b2f(sax_inputs).A.sum(axis=1)
-        )
-
-        return fg_comp
+    def select(self, **kwargs):
+        pass
 
     def reset(self):
         self.reset_all()
@@ -144,16 +132,16 @@ class YalaDrainer(FiringGraphDrainer):
         return sax_precision > (sax_precision > 0).dot(diags(ax_target_prec, format='csc'))
 
     @abstractmethod
-    def select_support_bits(self, sax_drained_weights, sax_count_activations):
+    def select_support_bits(self, sax_drained_weights, sax_count_activations, **kwargs):
         pass
 
-    def update_partition_metrics(self, sax_inputs):
-        # Compute metrics
-        ax_areas = sax_inputs.sum(axis=0).A[0, :] / (self.bitmap.b2f(sax_inputs).A.sum(axis=1) + 1e-6)
+    def update_partition_metrics(self, comp):
+        ax_areas = comp.inputs.sum(axis=0).A[0, :] / (self.bitmap.b2f(comp.inputs).A.sum(axis=1) + 1e-6)
+        return comp.update(
+            partitions=[
+                {**p, "area": ax_areas[i], "precision": self.drainer_params.precisions[i]}
+                for i, p in enumerate(comp.partitions)
+            ]
+        )
 
-        l_metrics = [
-            {**self.firing_graph.partitions[i], "precision": self.drainer_params.precisions[i], "area": ax_areas[i]}
-            for i in range(sax_inputs.shape[1])
-        ]
-        return l_metrics
 

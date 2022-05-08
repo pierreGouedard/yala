@@ -132,6 +132,8 @@ class Yala(object):
                     .drain_all()\
                     .select(merge=False)
                 drainer.reset()
+                # TODO: maybe pop base components that does not required to go through next iteration (the one where
+                #   the base is fully replace by the CH (it is the one for which CH is empty.(tracker can do that)
 
                 # Draining part 2: Merge components
                 base_components = drainer.prepare(
