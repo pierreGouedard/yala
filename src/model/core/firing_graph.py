@@ -52,13 +52,13 @@ class YalaFiringGraph(FiringGraph):
         sax_x = server.next_forward(n=n, update_step=False).sax_data_forward
 
         # propagate through firing graph
-        sax_fg = self.propagate(sax_x)
+        sax_fg = self.propagate(sax_x, return_activations=True)
 
         # Get masked activations
-        sax_product = sax_x.astype(bool).T.dot(sax_fg).astype(int)
+        sax_product = (sax_x.T.dot(sax_fg) > 0).astype(int)
 
         if mask is not None:
-            sax_product = sax_product * mask
+            sax_product = sax_product.multiply(mask)
 
         return FgComponents(inputs=sax_product, levels=np.ones(sax_fg.shape[1]), partitions=self.partitions)
 

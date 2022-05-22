@@ -5,7 +5,7 @@ from scipy.sparse import csc_matrix
 # Local import
 from src.model.core.data_models import FgComponents
 from src.model.core.drainers.visualizer import Visualizer
-from src.model.utils import sample_from_mask
+from src.model.core.sampling import sample_from_mask
 
 
 class Shaper(Visualizer):
@@ -13,9 +13,13 @@ class Shaper(Visualizer):
 
     def __init__(
             self, server, bitmap, drainer_params, min_firing=100, min_bounds=2, perf_plotter=None,
+            plot_perf_enabled=False, advanced_plot_perf_enabled=False
     ):
         # call parent constructor
-        super().__init__(server, bitmap, drainer_params, min_firing, min_bounds, perf_plotter=perf_plotter)
+        super().__init__(
+            server, bitmap, drainer_params, min_firing, min_bounds, perf_plotter=perf_plotter,
+            plot_perf_enabled=plot_perf_enabled, advanced_plot_perf_enabled=plot_perf_enabled
+        )
 
     def select(self, merge=False):
 
@@ -32,12 +36,14 @@ class Shaper(Visualizer):
 
         else:
             base_component = FgComponents(
-                inputs=sax_support_bits + self.fg_mask.I, partitions=self.firing_graph.partitions,
+                inputs=((sax_support_bits > 0) + self.fg_mask.I).astype(int), partitions=self.firing_graph.partitions,
                 levels=None
             )
             mask_comp = None
 
-        base_component = base_component.update(partitions=self.update_partition_metrics(base_component))
+        # Update partition + levels of base
+        base_component = self.update_partition_metrics(base_component)\
+            .update(levels=self.bitmap.b2f(base_component.inputs.astype(bool)).A.sum(axis=1))
 
         return base_component, mask_comp
 
@@ -45,7 +51,7 @@ class Shaper(Visualizer):
         # Get active & drained bits
         sax_active_inputs = self.select_inputs(sax_drained_weights, sax_count_activations)
 
-        # TODO: Add layer so that the integrity & convexity of base is preserved (no hole)
+        # TODO: Add layer so that the integrity & convexity of base is preserved (no hole) <= So important
 
         # Compute input cardinality for each features
         ax_card_selected: np.ndarray = self.bitmap.b2f(sax_active_inputs.astype(int)).A
@@ -71,7 +77,5 @@ class Shaper(Visualizer):
         if self.advanced_plot_perf_enabled:
             self.visualize_multi_selection(sax_active_inputs, ax_mask_support)
 
-        import IPython
-        IPython.embed()
         return sax_support_bits
 

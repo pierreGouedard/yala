@@ -7,7 +7,7 @@ from abc import abstractmethod
 
 # Local import
 from src.model.core.data_models import FgComponents
-from src.model.utils import init_parameters
+from src.model.core.drainers.utils import init_parameters
 from src.model.core.firing_graph import YalaFiringGraph, YalaTopPattern
 
 
@@ -72,9 +72,13 @@ class YalaDrainer(FiringGraphDrainer):
 
         # Get firing graph to drain
         self.firing_graph = YalaFiringGraph.from_fg_comp(component.copy(
-            inputs=csc_matrix((component.inputs.A ^ ch_comp.inputs.A))
+            inputs=csc_matrix((component.inputs.A.astype(bool) ^ ch_comp.inputs.A.astype(bool)).astype(int))
         ))
         self.original_inputs = component.inputs.copy()
+
+        # TODO: to remove (tmp test)
+        import numpy as np
+        self.visualize_shapes(YalaFiringGraph.from_fg_comp(component.copy(levels=np.array([3.]))), self.fg_mask)
 
     def get_triplet(self, component):
         # Get masked activations
@@ -88,8 +92,13 @@ class YalaDrainer(FiringGraphDrainer):
         return sax_x, sax_y, sax_fg
 
     def setup_params(self, component):
+        # Get convex component
+        component = component.update(levels=self.bitmap.b2f(component.inputs.astype(bool)).A.sum(axis=1))
+
         # Get signals to estimate precision
-        _, sax_y, sax_fg = self.get_triplet(component)
+        _, sax_y, sax_fg = self.get_triplet(
+            component.update(levels=self.bitmap.b2f(component.inputs.astype(bool)).A.sum(axis=1))
+        )
 
         # Get arg max as label, keep max precision
         ax_precisions = (sax_y.T.astype(int).dot(sax_fg) / (sax_fg.sum(axis=0) + 1e-6)).A
@@ -136,7 +145,7 @@ class YalaDrainer(FiringGraphDrainer):
         pass
 
     def update_partition_metrics(self, comp):
-        ax_areas = comp.inputs.sum(axis=0).A[0, :] / (self.bitmap.b2f(comp.inputs).A.sum(axis=1) + 1e-6)
+        ax_areas = comp.inputs.sum(axis=0).A[0, :] / (self.bitmap.b2f(comp.inputs.astype(bool)).A.sum(axis=1) + 1e-6)
         return comp.update(
             partitions=[
                 {**p, "area": ax_areas[i], "precision": self.drainer_params.precisions[i]}
