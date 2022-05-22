@@ -3,8 +3,7 @@ import numpy as np
 from scipy.sparse import csc_matrix
 
 # Local import
-from src.model.utils import sample_from_mask
-from src.model.core.data_models import FgComponents
+from src.model.core.sampling import sample_from_mask
 from src.model.core.drainers.visualizer import Visualizer
 
 
@@ -16,7 +15,7 @@ class Cleaner(Visualizer):
         # call parent constructor
         super().__init__(server, bitmap, drainer_params, min_firing, min_bounds, perf_plotter=perf_plotter)
 
-    def select_support_bits(self, sax_drained_weights, sax_count_activations):
+    def select_support_bits(self, sax_drained_weights, sax_count_activations, **kwargs):
         # TODO: obsolete => Good but meant to remove 1 bound at a time
         # Get selected bits keep if support
         sax_active_inputs = self.select_inputs(sax_drained_weights, sax_count_activations)

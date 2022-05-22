@@ -1,6 +1,6 @@
 """All classes that specify data structures."""
 # Global import
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from scipy.sparse import spmatrix, csc_matrix, hstack as sphstack
 from copy import deepcopy as copy
@@ -9,7 +9,7 @@ import numpy as np
 from scipy.signal import convolve2d
 
 # Local import
-from src.model.utils import sample_from_proba
+from src.model.core.sampling import sample_from_proba
 
 
 @dataclass
@@ -103,11 +103,10 @@ class FgComponents:
 
         return self.copy(inputs=csc_matrix(ax_reduced_inputs), **cmp_kwargs)
 
-    def sample(self, n, ax_probas, **cmp_kwargs):
+    def sample(self, n, ax_probas, bitmap, **cmp_kwargs):
         # Select randomly n_convex_bounds that are not masked
         sax_sampled = csc_matrix(sample_from_proba(ax_probas, n=n).T)
-
-        return self.update(**{'inputs': sax_sampled, **cmp_kwargs})
+        return self.update(**{'inputs': self.inputs.multiply(bitmap.f2b(sax_sampled)), **cmp_kwargs})
 
     def pop(self, ind):
         tmp = self[ind]
@@ -130,7 +129,8 @@ class ConvexHullProba:
     counts: Optional[Dict[str, np.array]] = None
 
     def get_probas(self, comp: FgComponents, bitmap: BitMap):
-        ax_support_bounds = bitmap.b2f(comp.inputs.astype(bool))
+        ax_support_bounds = bitmap.b2f(comp.inputs.astype(bool)).A
+
         if self.counts is None:
             ax_counts = np.ones(ax_support_bounds.shape)
         else:
@@ -138,18 +138,17 @@ class ConvexHullProba:
 
         ax_p = ~ax_support_bounds / ax_counts
 
-        return ax_p / ax_p.sum(axis=0)
+        return ax_p / ax_p.sum(axis=1)
 
     def add(self, comp: FgComponents, bitmap: BitMap):
         if self.counts is None:
             self.counts = {}
 
-        ax_counts = bitmap.b2f(comp.inputs.astype(bool))
+        ax_counts = bitmap.b2f(comp.inputs.astype(bool)).A
         self.counts = {
             d['id']: self.counts.get(d['id'], np.ones(bitmap.nf)) + ax_counts[i]
             for i, d in enumerate(comp.partitions)
         }
-
         return self
 
 

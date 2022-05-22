@@ -4,7 +4,7 @@ from numpy import ones
 # Local import
 from src.model.core.firing_graph import YalaFiringGraph
 from src.model.core.server import YalaUnclassifiedServer, YalaMisclassifiedServer
-from src.model.core.data_models import DrainerParameters, TrackerParameters, FgComponents, ConvexHullProba, BitMap
+from src.model.core.data_models import DrainerParameters, TrackerParameters, ConvexHullProba, BitMap
 from src.model.utils import init_sample
 from src.model.core.encoder import MultiEncoders
 from src.model.core.drainers.shaper import Shaper
@@ -78,21 +78,9 @@ class Yala(object):
 
         drainer = Shaper(
             self.server, self.bitmap, self.drainer_params, min_firing=self.min_firing,
-            perf_plotter=kwargs.get('perf_plotter', None)
+            perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True,
+            advanced_plot_perf_enabled=True
         )
-
-        ## TODO: Things to do for this new version:
-        #   * In step 1: CH as mask (full convex level) / shrinked base (level=1) drained:
-        #       * Only bits of base bound between CH of mask & passed base are drained (=> CH computation needed)
-        #       * The integrity & convexity of base should always be preserved after rule applied:
-        #         * if a base bound is not support => remove bound from base
-        #         * if none base bounds are support => keep the entire CH as base
-        #         * if only (n-1) base is support => keep the (n-1) + 1 random (n=2 in 2D space, 3 in 3D, ...)
-        #         * drained base & CH are outputed separately
-        #   * In step 2: Remaining base (full convex level) is mask / CH (level=1) is drained:
-        #       * Same rule of selection applies (except the rule on n-1 support)
-        #       * support of drained CH & mask are merged to compose a new convex base.
-        #   * Track convergence of nodes and iterates if any vertex that has note converged remains.
 
         n_ch_candidate = 2
         for i in range(self.n_run):
@@ -119,12 +107,14 @@ class Yala(object):
                     .get_convex_hull(self.server, self.drainer_params.batch_size)
 
                 ch_components = ch_components.sample(
-                    ch_probas.get_probas(base_components, self.bitmap), n_ch_candidate,
-                    {"levels": ones(len(ch_components)) * n_ch_candidate}
+                    n_ch_candidate, ch_probas.get_probas(base_components, self.bitmap), self.bitmap,
+                    **{"levels": ones(len(ch_components)) * n_ch_candidate}
                 )
-                ch_probas.add(ch_components, self.bitmap.b2f(ch_components.inputs.astype(bool)))
+                ch_probas.add(ch_components, self.bitmap)
 
                 # Draining part 1: keep separated components
+                print('first drainer')
+
                 base_components, ch_components = drainer.prepare(
                     base_components.shrink(self.bitmap, **{'levels': ones(len(base_components))}),
                     ch_components
@@ -132,18 +122,19 @@ class Yala(object):
                     .drain_all()\
                     .select(merge=False)
                 drainer.reset()
-                # TODO: maybe pop base components that does not required to go through next iteration (the one where
-                #   the base is fully replace by the CH (it is the one for which CH is empty.(tracker can do that)
 
+                print("second drainer")
                 # Draining part 2: Merge components
-                base_components = drainer.prepare(
+                base_components, _ = drainer.prepare(
                     ch_components.update(**{'levels': ones(len(ch_components))}),
                     base_components
                 )\
                     .drain_all()\
                     .select(merge=True)
                 drainer.reset()
-
+                print(f'End cycle: {base_components}')
+                import IPython
+                IPython.embed()
                 # Swap from compression to expansion & track metrics TODO: ?? rename da shit
                 base_components = tracker.swap_components(base_components)
 
