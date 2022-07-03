@@ -132,7 +132,9 @@ class Yala(object):
                     .drain_all()\
                     .select(merge=True)
                 drainer.reset()
+
                 print(f'End cycle: {base_components}')
+                drainer.visualize_fg(YalaFiringGraph.from_fg_comp(base_components))
                 import IPython
                 IPython.embed()
                 # Swap from compression to expansion & track metrics TODO: ?? rename da shit
