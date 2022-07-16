@@ -6,10 +6,8 @@ from scipy.sparse import spmatrix, csc_matrix, hstack as sphstack
 from copy import deepcopy as copy
 from functools import lru_cache
 import numpy as np
-from scipy.signal import convolve2d
 
 # Local import
-from src.model.core.sampling import sample_from_proba
 
 
 @dataclass
@@ -27,6 +25,12 @@ class BitMap:
 
     def f2b(self, sax_x):
         return self.bf_map.dot(sax_x)
+
+    def bitmask(self, sax_x):
+        return self.f2b(self.b2f(sax_x).T)
+
+    def explode(self, sax_x, ind=0):
+        return sax_x[:, [ind] * self.nf].multiply(self.bf_map)
 
 
 @dataclass
@@ -85,28 +89,25 @@ class FgComponents:
 
         return self
 
-    def shrink(self, bit_map, reduce_factor=0.4, inplace=True, **cmp_kwargs):
-        # Init variables
-        ax_reduced_inputs, sax_counts = np.zeros(self.inputs.shape, dtype=bool), bit_map.b2f(self.inputs.astype(int))
-        ax_lengths = np.unique(sax_counts.data)
-        sax_counts.data = ((sax_counts.data * reduce_factor) / 2).round().clip(min=1).astype(int)
-
-        # Reduce convex hull
-        for w in ax_lengths:
-            win_len = int(w + (w % 2 == 0))
-            ax_win = np.ones((win_len, 1))
-            ax_mask = bit_map.bf_map.dot(sax_counts.A.T.astype(int))
-            ax_reduced_inputs |= convolve2d(self.inputs.A, ax_win, mode='same') >= (win_len // 2) + 1 + ax_mask
+    def complement(self, sax_mask=None, inplace=False, **kwargs):
+        sax_inputs = csc_matrix((self.inputs > 0).A ^ np.ones(self.inputs.shape, dtype=bool))
+        if sax_mask is not None:
+            sax_inputs = sax_inputs.multiply(sax_mask)
 
         if inplace:
-            return self.update(**{'inputs': csc_matrix(ax_reduced_inputs), **cmp_kwargs})
+            self.update(inputs=sax_inputs, **kwargs)
+        else:
+            return self.copy(inputs=sax_inputs, **kwargs)
 
-        return self.copy(inputs=csc_matrix(ax_reduced_inputs), **cmp_kwargs)
+    def explode(self, bitmap: BitMap, inplace=False, **kwargs):
+        sax_inputs = sphstack([bitmap.explode(self.inputs, i) for i in range(self.inputs.shape[1])])
+        partitions = [{'contract_id': f'{i}', **p} for i, p in enumerate(self.partitions) for _ in range(bitmap.nf)]
+        levels = np.ones(len(partitions))
 
-    def sample(self, n, ax_probas, bitmap, **cmp_kwargs):
-        # Select randomly n_convex_bounds that are not masked
-        sax_sampled = csc_matrix(sample_from_proba(ax_probas, n=n).T)
-        return self.update(**{'inputs': self.inputs.multiply(bitmap.f2b(sax_sampled)), **cmp_kwargs})
+        if inplace:
+            self.update(inputs=sax_inputs, partitions=partitions, levels=levels, **kwargs)
+        else:
+            return self.copy(inputs=sax_inputs, partitions=partitions, levels=levels, **kwargs)
 
     def pop(self, ind):
         tmp = self[ind]

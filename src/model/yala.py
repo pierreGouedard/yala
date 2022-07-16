@@ -2,13 +2,13 @@
 from numpy import ones
 
 # Local import
-from src.model.core.firing_graph import YalaFiringGraph
 from src.model.core.server import YalaUnclassifiedServer, YalaMisclassifiedServer
-from src.model.core.data_models import DrainerParameters, TrackerParameters, ConvexHullProba, BitMap
-from src.model.utils import init_sample
+from src.model.utils.data_models import DrainerParameters, TrackerParameters, BitMap
 from src.model.core.encoder import MultiEncoders
 from src.model.core.drainers.shaper import Shaper
+from src.model.core.cleaner import Cleaner
 from src.model.core.tracker import Tracker
+from src.model.core.sampler import Sampler
 
 
 class Yala(object):
@@ -76,21 +76,35 @@ class Yala(object):
         else:
             raise NotImplementedError
 
-        drainer = Shaper(
+        ## TODO: Again here we are going through a fundamental refactor of the procedure:
+        ##  in this new procedure we will:
+        #       1- "move" 1 bound at a time DONE
+        #       2- optimize the cleaner so no draining is necessary + remove 1 bound at a time DONE
+        #       3- Make sure the Integrity of convex component is preserved at all time TODO
+        #
+        #   Task 1:
+        #       Refactor the cleaner - DONE
+        #   Task 2:
+        #       Refactor the Yala drainer so it handle the logic of 1 at a time => TOTEST
+        #   Task 3:
+        #       Refactor Yala drainer so it handle the preservation of integrity of convex component => TODO
+        #   Task 4:
+        #       Change & adapt the core of YALA (this file, basically) => TOTEST
+
+        shaper = Shaper(
             self.server, self.bitmap, self.drainer_params, min_firing=self.min_firing,
             perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True,
             advanced_plot_perf_enabled=True
         )
+        cleaner = Cleaner(self.server, self.bitmap, self.drainer_params.batch_size)
+        sampler = Sampler(self.server, self.bitmap)
 
         n_ch_candidate = 2
         for i in range(self.n_run):
             print("[YALA]: Iteration {}".format(i))
 
             # Initial sampling
-            base_components = init_sample(
-                self.n_parallel, self.init_level, self.server, self.bitmap, window_length=7
-            )
-            ch_probas = ConvexHullProba()
+            base_components = sampler.init_sample(self.n_parallel, window_length=7)
 
             # Instantiate tracking
             tracker = Tracker(
@@ -101,56 +115,28 @@ class Yala(object):
             # Core loop
             i = 0
             while len(base_components) > 0 and i < self.max_iter:
+                # Shape components
+                base_components = shaper.shape(base_components)
+                shaper.reset()
 
-                # Sample bounds for convex hull & update ch proba
-                ch_components = YalaFiringGraph.from_fg_comp(base_components)\
-                    .get_convex_hull(self.server, self.drainer_params.batch_size)
+                # Clean base components
+                base_components = cleaner.clean_component(base_components)
 
-                ch_components = ch_components.sample(
-                    n_ch_candidate, ch_probas.get_probas(base_components, self.bitmap), self.bitmap,
-                    **{"levels": ones(len(ch_components)) * n_ch_candidate}
-                )
-                ch_probas.add(ch_components, self.bitmap)
-
-                # Draining part 1: keep separated components
-                print('first drainer')
-
-                base_components, ch_components = drainer.prepare(
-                    base_components.shrink(self.bitmap, **{'levels': ones(len(base_components))}),
-                    ch_components
-                )\
-                    .drain_all()\
-                    .select(merge=False)
-                drainer.reset()
-
-                print("second drainer")
-                # Draining part 2: Merge components
-                base_components, _ = drainer.prepare(
-                    ch_components.update(**{'levels': ones(len(ch_components))}),
-                    base_components
-                )\
-                    .drain_all()\
-                    .select(merge=True)
-                drainer.reset()
-
-                print(f'End cycle: {base_components}')
-                drainer.visualize_fg(YalaFiringGraph.from_fg_comp(base_components))
-                import IPython
-                IPython.embed()
-                # Swap from compression to expansion & track metrics TODO: ?? rename da shit
+                # Check for component that has converged
                 base_components = tracker.swap_components(base_components)
+
+                # Resample new bounds for base components that have not converged yet
+                sampler.sample_bounds(base_components, self.drainer_params.batch_size)
 
                 if i % 5 == 0:
                     tracker.visualize_indicators()
                     if base_components is not None:
-                        drainer.visualize_fg(YalaFiringGraph.from_fg_comp(base_components))
+                        shaper.visualize_comp(base_components)
                     resp = input('would you like to activate visualisation now ?')
-
                     if resp == "yes":
-                        drainer.plot_perf_enabled = True
-                        drainer.advanced_plot_perf_enabled = True
-                        drainer.plot_perf_enabled = True
-                        drainer.advanced_plot_perf_enabled = True
+                        shaper.plot_perf_enabled = True
+                        shaper.advanced_plot_perf_enabled = True
+
                 i += 1
 
                 if base_components is None:
@@ -158,7 +144,6 @@ class Yala(object):
 
             tracker.visualize_indicators()
             complete_components = tracker.components
-            for comp in complete_components:
-                drainer.visualize_fg(YalaFiringGraph.from_fg_comp(comp))
+            shaper.visualize_comp(complete_components)
 
         return self
