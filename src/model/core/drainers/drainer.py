@@ -1,12 +1,9 @@
 # Global import
 from dataclasses import asdict
 from firing_graph.solver.drainer import FiringGraphDrainer
-from scipy.sparse import diags, csc_matrix
-from abc import abstractmethod
-
+from scipy.sparse import diags
 
 # Local import
-from src.model.core.data_models import FgComponents
 from src.model.core.drainers.utils import init_parameters
 from src.model.core.firing_graph import YalaFiringGraph, YalaTopPattern
 
@@ -25,17 +22,19 @@ class YalaDrainer(FiringGraphDrainer):
         self.min_bounds = min_bounds
 
         # Handy
-        self.original_inputs = None
+        self.base_component = None
 
         # call parent constructor
         super().__init__(None, server, self.drainer_params.batch_size)
 
-    def prepare(self, component, mask_component, **kwargs):
-        # Build top and bottom patterns
-        self.build_patterns(component, mask_component, **kwargs)
+    def prepare(self, component, mask_component, base_component):
+        # Instantiate firing graphs
+        self.fg_mask = YalaFiringGraph.from_fg_comp(mask_component)
+        self.firing_graph = YalaFiringGraph.from_fg_comp(component)
+        self.base_component = base_component
 
         # Set drainer params & set weights
-        self.setup_params(component)
+        self.setup_params()
 
         return self
 
@@ -54,51 +53,34 @@ class YalaDrainer(FiringGraphDrainer):
         return self
 
     def select(self, **kwargs):
-        pass
+        # Get active & drained bits
+        sax_active_inputs = self.select_inputs(self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
+        sax_support_bits = sax_active_inputs + self.base_component.inputs
+        # TODO: Add layer so that the integrity & convexity of base is preserved (no hole) <= So important
+
+        # Build component
+        self.base_component.update(inputs=sax_support_bits)
+
+        return self.update_partition_metrics()
 
     def reset(self):
         self.reset_all()
-        self.firing_graph, self.fg_mask, self.original_inputs = None, None, None
+        self.firing_graph, self.fg_mask, self.base_component = None, None, None
 
-    def build_patterns(self, component, mask_component, **kwargs):
-        # Instantiate mask firing graph
-        self.fg_mask = YalaFiringGraph.from_fg_comp(mask_component)
-
-        # Get hull of base
-        ch_comp = self.fg_mask.get_convex_hull(
-            self.server, self.drainer_params.batch_size,
-            mask=self.bitmap.f2b(self.bitmap.b2f(component.inputs.astype(bool)).T)
-        )
-
-        # Get firing graph to drain
-        self.firing_graph = YalaFiringGraph.from_fg_comp(component.copy(
-            inputs=csc_matrix((component.inputs.A.astype(bool) ^ ch_comp.inputs.A.astype(bool)).astype(int))
-        ))
-        self.original_inputs = component.inputs.copy()
-
-        # TODO: to remove (tmp test)
-        import numpy as np
-        self.visualize_shapes(YalaFiringGraph.from_fg_comp(component.copy(levels=np.array([3.]))), self.fg_mask)
-
-    def get_triplet(self, component):
+    def get_triplet(self,):
         # Get masked activations
         sax_x = self.server.next_forward(n=self.drainer_params.batch_size, update_step=False).sax_data_forward
         sax_y = self.server.next_backward(n=self.drainer_params.batch_size, update_step=False).sax_data_backward
 
         # propagate through firing graph
-        sax_fg = YalaFiringGraph.from_fg_comp(component.copy(levels=component.levels))\
-            .propagate(sax_x)
+        sax_fg = YalaFiringGraph.from_fg_comp(self.base_component).propagate(sax_x)
 
         return sax_x, sax_y, sax_fg
 
-    def setup_params(self, component):
-        # Get convex component
-        component = component.update(levels=self.bitmap.b2f(component.inputs.astype(bool)).A.sum(axis=1))
+    def setup_params(self):
 
         # Get signals to estimate precision
-        _, sax_y, sax_fg = self.get_triplet(
-            component.update(levels=self.bitmap.b2f(component.inputs.astype(bool)).A.sum(axis=1))
-        )
+        _, sax_y, sax_fg = self.get_triplet()
 
         # Get arg max as label, keep max precision
         ax_precisions = (sax_y.T.astype(int).dot(sax_fg) / (sax_fg.sum(axis=0) + 1e-6)).A
@@ -131,7 +113,6 @@ class YalaDrainer(FiringGraphDrainer):
 
         # Get input weights and count
         sax_mask = (sax_weight > 0).multiply(sax_count > 0)
-
         sax_nom = sax_weight.multiply(sax_mask) - sax_mask.dot(diags(ax_w, format='csc'))
         sax_denom = sax_mask.multiply(sax_count.dot(diags(ax_p + ax_r, format='csc')))
         sax_precision = sax_nom.multiply(sax_denom.astype(float).power(-1))
@@ -140,17 +121,12 @@ class YalaDrainer(FiringGraphDrainer):
         # Compute selected inputs
         return sax_precision > (sax_precision > 0).dot(diags(ax_target_prec, format='csc'))
 
-    @abstractmethod
-    def select_support_bits(self, sax_drained_weights, sax_count_activations, **kwargs):
-        pass
-
-    def update_partition_metrics(self, comp):
-        ax_areas = comp.inputs.sum(axis=0).A[0, :] / (self.bitmap.b2f(comp.inputs.astype(bool)).A.sum(axis=1) + 1e-6)
-        return comp.update(
+    def update_partition_metrics(self):
+        ax_areas = self.base_component.inputs.sum(axis=0).A[0, :] / \
+            (self.bitmap.b2f(self.base_component.inputs.astype(bool)).A.sum(axis=1) + 1e-6)
+        return self.base_component.update(
             partitions=[
                 {**p, "area": ax_areas[i], "precision": self.drainer_params.precisions[i]}
-                for i, p in enumerate(comp.partitions)
+                for i, p in enumerate(self.base_component.partitions)
             ]
         )
-
-
