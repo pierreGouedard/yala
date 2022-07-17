@@ -14,6 +14,7 @@ def expand(sax_inputs, bitmap, n):
 
 def shrink(sax_inputs, bitmap, p_shrink=0.4):
     # Init variables
+    sax_inputs.data = (sax_inputs.data > 0).astype(int)
     ax_reduced_inputs, sax_counts = np.zeros(sax_inputs.shape, dtype=bool), bitmap.b2f(sax_inputs.astype(int))
     ax_lengths = np.unique(sax_counts.data)
     sax_counts.data = ((sax_counts.data * p_shrink) / 2).round().clip(min=1).astype(int)
@@ -26,6 +27,26 @@ def shrink(sax_inputs, bitmap, p_shrink=0.4):
         ax_reduced_inputs |= convolve2d(sax_inputs.A, ax_win, mode='same') >= (win_len // 2) + 1 + ax_mask
 
     return csc_matrix(ax_reduced_inputs)
+
+
+def bounds(sax_inputs, bitmap):
+    # Build mask
+    ax_mask = (np.eye(2)[:, 0] - np.eye(2)[:, 1])[:, np.newaxis]
+
+    # Left edge detect
+    sax_inputs_l = csc_matrix(convolve2d((sax_inputs > 0).A.astype(int), ax_mask, mode='same') > 0).multiply(
+        bitmap.bitmask(sax_inputs > 0)
+    ).astype(int)
+
+    # Right edge detect
+    sax_inputs_r = csc_matrix(convolve2d((sax_inputs > 0).A.astype(int)[::-1, :], ax_mask, mode='same') > 0).multiply(
+        bitmap.bitmask(sax_inputs > 0)[::-1, :]
+    ).astype(int)[::-1, :]
+
+    # Gather edge detect
+    sax_inputs = sax_inputs_r + sax_inputs_l
+
+    return sax_inputs
 
 
 def connex():

@@ -6,7 +6,7 @@ from scipy.sparse import lil_matrix, hstack, eye, spmatrix
 # Local import
 from firing_graph.data_structure.graph import FiringGraph
 from firing_graph.data_structure.utils import create_empty_matrices, set_matrices_spec
-from src.model.core.data_models import FgComponents
+from src.model.utils.data_models import FgComponents
 
 
 class YalaFiringGraph(FiringGraph):

@@ -5,7 +5,7 @@ from scipy.sparse import diags
 
 # Local import
 from src.model.core.drainers.utils import init_parameters
-from src.model.core.firing_graph import YalaFiringGraph, YalaTopPattern
+from src.model.utils.firing_graph import YalaFiringGraph, YalaTopPattern
 
 
 class YalaDrainer(FiringGraphDrainer):

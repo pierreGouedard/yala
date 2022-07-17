@@ -4,7 +4,7 @@ import numpy as np
 from copy import deepcopy as copy
 
 # Local import
-from src.model.core.data_models import FgComponents
+from src.model.utils.data_models import FgComponents
 
 
 class Tracker:

@@ -5,11 +5,11 @@ import unittest
 
 # Local import
 from src.model.core.server import YalaUnclassifiedServer
-from src.model.core.firing_graph import YalaFiringGraph
+from src.model.utils.firing_graph import YalaFiringGraph
 from src.model.core.encoder import MultiEncoders
-from src.model.core.data_models import BitMap
+from src.model.utils.data_models import BitMap
 from src.model.core.cleaner import Cleaner
-from src.model.utils import init_sample
+from src.model.core.sampler import Sampler
 
 
 class TestCleaner(unittest.TestCase):
@@ -21,15 +21,21 @@ class TestCleaner(unittest.TestCase):
         self.augmented_features = self.origin_features.dot(self.basis) * 100
         self.targets = np.zeros(self.origin_features.shape[0])
 
+        # Instantiate visualizer
+        self.perf_plotter = PerfPlotter(
+            self.origin_features, self.targets, list(range(len(self.targets)))
+        )
+
         # Build model's element
         self.encoder = MultiEncoders(50, 'quantile', bin_missing=False)
         X_enc, y_enc = self.encoder.fit_transform(X=self.augmented_features, y=self.targets)
         self.server = YalaUnclassifiedServer(X_enc, y_enc).stream_features()
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
-        self.cleaner = Cleaner(self.server, self.bitmap, 3000)
+        self.cleaner = Cleaner(self.server, self.bitmap, 3000, perf_plotter=self.perf_plotter, plot_perf_enable=True)
+        self.sampler = Sampler(self.server, self.bitmap)
 
         # Build test components
-        self.test_component = init_sample(1, 2, self.server, self.bitmap, window_length=10)
+        self.test_component = self.sampler.init_sample(1, window_length=10)
         self.test_component_ch = YalaFiringGraph.from_fg_comp(self.test_component)\
             .get_convex_hull(self.server, 3000)
 
@@ -99,3 +105,24 @@ class TestCleaner(unittest.TestCase):
         clean_component = self.cleaner.clean_component(
             self.test_component_ch.copy(inputs=sax_inputs, levels=np.ones(1) * 4)
         )
+
+
+class PerfPlotter:
+
+    def __init__(self, ax_x, ax_y, indices):
+        self.x = ax_x
+        self.y = ax_y
+        self.indices = indices
+
+    def __call__(self, ax_yhat):
+        for i in range(ax_yhat.shape[1]):
+            fig, (ax_got, ax_hat) = plt.subplots(1, 2)
+            fig.suptitle(f'Viz GOT vs Preds #{i}')
+
+            ax_got.scatter(self.x[self.y > 0, 0], self.x[self.y > 0, 1], c='r', marker='+')
+            ax_got.scatter(self.x[self.y == 0, 0], self.x[self.y == 0, 1], c='b', marker='o')
+
+            ax_hat.scatter(self.x[ax_yhat[:, i] > 0, 0], self.x[ax_yhat[:, i] > 0, 1], c='r', marker='+')
+            ax_hat.scatter(self.x[ax_yhat[:, i] == 0, 0], self.x[ax_yhat[:, i] == 0, 1], c='b', marker='o')
+
+            plt.show()
