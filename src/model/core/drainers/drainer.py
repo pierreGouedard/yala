@@ -56,6 +56,7 @@ class YalaDrainer(FiringGraphDrainer):
         # Get active & drained bits
         sax_active_inputs = self.select_inputs(self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
         sax_support_bits = sax_active_inputs + self.base_component.inputs
+
         # TODO: Add layer so that the integrity & convexity of base is preserved (no hole) <= So important
 
         # Build component

@@ -91,6 +91,11 @@ class Yala(object):
         #   Task 4:
         #       Change & adapt the core of YALA (this file, basically) => TOTEST
 
+        # TODO - as we implement connex from linalg:
+        #   - make use of linalg.axpand in init_sample from sampler
+        #   - expand => expand by features, not all together
+        #   - that all folks.
+
         shaper = Shaper(
             self.server, self.bitmap, self.drainer_params, min_firing=self.min_firing,
             perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True,

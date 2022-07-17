@@ -30,27 +30,27 @@ class Visualizer(YalaDrainer):
             # GOT
             plt.scatter(
                 self.perf_plotter.x[self.perf_plotter.y > 0, 0], self.perf_plotter.x[self.perf_plotter.y > 0, 1],
-                c='g', alpha=0.05, label='got (True)'
+                c='g', alpha=0.3, marker='s', label='got (True)'
             )
 
             # Mask space
             plt.scatter(
                 self.perf_plotter.x[ax_mask_y[:, i] > 0, 0], self.perf_plotter.x[ax_mask_y[:, i] > 0, 1],
-                c='r', alpha=0.1, label='Mask space'
+                c='b', alpha=0.5, marker="+", label='Mask space', s=50
             )
 
             # Search space
             plt.scatter(
-                self.perf_plotter.x[ax_drain_y.multiply(ax_mask_y)[:, i] > 0, 0],
-                self.perf_plotter.x[ax_drain_y.multiply(ax_mask_y)[:, i] > 0, 1], c='r', alpha=0.1,
-                label='Search space'
+                self.perf_plotter.x[(ax_drain_y * ax_mask_y)[:, i] > 0, 0],
+                self.perf_plotter.x[(ax_drain_y * ax_mask_y)[:, i] > 0, 1], c='r',
+                alpha=0.5, marker='+', label='Search space', s=50
             )
 
             # Post shaping space
             plt.scatter(
-                self.perf_plotter.x[ax_drain_y.multiply(ax_mask_y).multiply(ax_base_y) > 0, 0],
-                self.perf_plotter.x[ax_drain_y.multiply(ax_mask_y).multiply(ax_base_y) > 0, 1],
-                c='k', alpha=0.1, label='Post shaping space'
+                self.perf_plotter.x[(ax_drain_y * ax_mask_y * ax_base_y)[:, i] > 0, 0],
+                self.perf_plotter.x[(ax_drain_y * ax_mask_y * ax_base_y)[:, i] > 0, 1],
+                c='k', alpha=0.2, marker="s", label='Post shaping space'
             )
 
             plt.title(f'Component {i}: Shaping visualisation')
@@ -72,12 +72,14 @@ class Visualizer(YalaDrainer):
         if self.plot_perf_enabled is None:
             raise ValueError('Impossible to visualize firing graph: not plot perf.')
 
-        # Get masked activations
-        sax_x = self.server.get_sub_forward(self.perf_plotter.indices)
-        ax_yhat = YalaFiringGraph.from_fg_comp(components).propagate(sax_x).A
+        for i in range(len(components)):
+            # Get masked activations
+            sax_x = self.server.get_sub_forward(self.perf_plotter.indices)
 
-        # Plot perf viz
-        self.perf_plotter(ax_yhat)
+            ax_yhat = YalaFiringGraph.from_fg_comp(components).propagate(sax_x).A[:, [i]]
+
+            # Plot perf viz
+            self.perf_plotter(ax_yhat)
 
 
 
