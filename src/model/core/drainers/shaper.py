@@ -5,9 +5,9 @@ from scipy.sparse import csc_matrix, hstack as sphstack
 from typing import Dict
 
 # Local import
-from src.model.core.data_models import FgComponents
+from src.model.utils.data_models import FgComponents
 from src.model.core.drainers.visualizer import Visualizer
-from src.model.core.linalg import expand, shrink
+from src.model.utils.linalg import expand, shrink
 
 
 class Shaper(Visualizer):

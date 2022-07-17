@@ -40,7 +40,8 @@ class Sampler:
         comp = FgComponents(
             inputs=csc_matrix(ax_inputs), levels=(ax_inputs.T.dot(self.bitmap.bf_map.A) > 0).sum(axis=1),
             partitions=[
-                {'label_id': 0, 'id': ''.join(choices(ascii_uppercase, k=5)), "stage": "ongoing"} for _ in range(n)
+                {'label_id': 0, 'id': ''.join(choices(ascii_uppercase, k=5)), "stage": "ongoing"}
+                for _ in range(n_verts)
             ],
         )
 

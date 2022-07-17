@@ -2,7 +2,7 @@
 from matplotlib import pyplot as plt
 
 # Local import
-from src.model.core.firing_graph import YalaFiringGraph
+from src.model.utils.firing_graph import YalaFiringGraph
 from src.model.core.drainers.drainer import YalaDrainer
 
 

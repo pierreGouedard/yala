@@ -2,7 +2,7 @@
 import numpy as np
 
 # Local import
-from src.model.core.data_models import DrainerFeedbacks
+from src.model.utils.data_models import DrainerFeedbacks
 
 
 def init_parameters(drainer_params, min_firing):
