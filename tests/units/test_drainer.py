@@ -47,6 +47,10 @@ class TestDrainer(unittest.TestCase):
             plot_perf_enabled=True, advanced_plot_perf_enabled=True
         )
 
+        if self.plot_targets:
+            self.shaper.visualize_comp(self.got_components)
+            self.shaper.visualize_comp(self.shrink_components)
+
         print("======= GOT component input ======= ")
         print(self.bitmap.b2f(self.got_components.inputs).A)
         print("======= Shrink component input ======= ")
@@ -82,6 +86,8 @@ class TestDrainer(unittest.TestCase):
         python -m unittest tests.units.test_drainer.TestDrainer.test_draining
 
         """
+        shaped_components = self.shaper.shape(self.shrink_components)
+        self.shaper.reset()
         # TODO: Visual inspection + => assertion of the final area of shaped comp.
         import IPython
         IPython.embed()
