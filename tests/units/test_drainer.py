@@ -10,12 +10,15 @@ from src.model.core.drainers.shaper import Shaper
 from src.model.core.encoder import MultiEncoders
 from src.model.utils.data_models import BitMap, DrainerParameters
 from src.model.utils.data_models import FgComponents
-from src.model.utils.linalg import shrink
+from src.model.utils.spmat_op import shrink
+from tests.units.utils import PerfPlotter
 
 
 class TestDrainer(unittest.TestCase):
     width = 1
     plot_targets = True
+    advanced_shaper_plot = False
+    shaper_plot = True
 
     def setUp(self):
         # Create datasets
@@ -44,7 +47,7 @@ class TestDrainer(unittest.TestCase):
         self.drainer_params = DrainerParameters(total_size=20000, batch_size=10000, margin=0.05)
         self.shaper = Shaper(
             self.server, self.bitmap, self.drainer_params,  min_firing=10, perf_plotter=self.perf_plotter,
-            plot_perf_enabled=True, advanced_plot_perf_enabled=True
+            plot_perf_enabled=self.shaper_plot, advanced_plot_perf_enabled=self.advanced_shaper_plot
         )
 
         if self.plot_targets:
@@ -77,7 +80,7 @@ class TestDrainer(unittest.TestCase):
 
     def build_shrink_comp(self):
         return self.got_components.copy(
-            inputs=shrink(self.got_components.inputs, self.bitmap, p_shrink=0.5).astype(int),
+            inputs=shrink(self.got_components.inputs, self.bitmap, n_shrink=5).astype(int),
             partitions=[{"id": "shrink"}]
         )
 
@@ -88,27 +91,9 @@ class TestDrainer(unittest.TestCase):
         """
         shaped_components = self.shaper.shape(self.shrink_components)
         self.shaper.reset()
-        # TODO: Visual inspection + => assertion of the final area of shaped comp.
-        import IPython
-        IPython.embed()
 
+        got_area = self.got_components.inputs.sum(axis=0).A[0, :] / \
+            (self.bitmap.b2f(self.got_components.inputs.astype(bool)).A.sum(axis=1) + 1e-6)
 
-class PerfPlotter:
-
-    def __init__(self, ax_x, ax_y, indices):
-        self.x = ax_x
-        self.y = ax_y
-        self.indices = indices
-
-    def __call__(self, ax_yhat):
-        for i in range(ax_yhat.shape[1]):
-            fig, (ax_got, ax_hat) = plt.subplots(1, 2)
-            fig.suptitle(f'Viz GOT vs Preds #{i}')
-
-            ax_got.scatter(self.x[self.y > 0, 0], self.x[self.y > 0, 1], c='r', marker='+')
-            ax_got.scatter(self.x[self.y == 0, 0], self.x[self.y == 0, 1], c='b', marker='o')
-
-            ax_hat.scatter(self.x[ax_yhat[:, i] > 0, 0], self.x[ax_yhat[:, i] > 0, 1], c='r', marker='+')
-            ax_hat.scatter(self.x[ax_yhat[:, i] == 0, 0], self.x[ax_yhat[:, i] == 0, 1], c='b', marker='o')
-
-            plt.show()
+        self.assertTrue(abs(shaped_components.partitions[0]['area'] - got_area[0]) < 2)
+        self.assertAlmostEqual(shaped_components.partitions[0]['precision'], 1, delta=0.1)

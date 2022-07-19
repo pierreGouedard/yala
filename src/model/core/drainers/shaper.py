@@ -2,12 +2,11 @@
 import numpy as np
 from dataclasses import dataclass
 from scipy.sparse import csc_matrix, hstack as sphstack
-from typing import Dict
 
 # Local import
 from src.model.utils.data_models import FgComponents
 from src.model.core.drainers.visualizer import Visualizer
-from src.model.utils.linalg import expand, shrink
+from src.model.utils.spmat_op import expand, shrink
 
 
 class Shaper(Visualizer):
@@ -30,24 +29,22 @@ class Shaper(Visualizer):
         super().reset()
 
     def init_var(self, cmpnts):
-        mask = {
-            i: self.bitmap.bf_map[:, self.bitmap.b2f(cmpnts.inputs > 0).A[i, :]]
+        mask = np.stack([
+            self.bitmap.bf_map[:, self.bitmap.b2f(cmpnts.inputs > 0).A[i, :]]
             for i in range(len(cmpnts))
-        }
+        ])
         self.mask_bound_manager = MaskBoundManager(cmpnts.levels.copy(), cmpnts.levels.copy(), mask)
 
         return FgComponents.empty_comp()
 
-    def shape(self, base_components, n_expand=4, p_shrink=0.4):
+    def shape(self, base_components, n_expand=4, n_shrink=2):
 
         conv_components = self.init_var(base_components)
         d_areas = {p['id']: p.get('area', 0) for p in base_components.partitions}
         while len(base_components) > 0:
             # Shrink bound to drain
-            import IPython
-            IPython.embed()
             sax_drain_inputs = base_components.inputs.multiply(self.mask_bound_manager.get_drain_bmask())
-            sax_shrink_inputs = shrink(sax_drain_inputs, self.bitmap, p_shrink)
+            sax_shrink_inputs = shrink(sax_drain_inputs, self.bitmap, n_shrink)
 
             drain_components = FgComponents(
                 inputs=sax_shrink_inputs, levels=np.ones(len(self.mask_bound_manager)),
@@ -70,7 +67,6 @@ class Shaper(Visualizer):
                 self.visualize_shaping(drain_components, mask_components, base_components)
 
             self.mask_bound_manager.decrement()
-            # TODO: the below line doesn"t work
             conv_components, base_components, d_areas = self.pop_conv_comp(base_components, conv_components, d_areas)
 
         if self.plot_perf_enabled:
@@ -97,8 +93,6 @@ class Shaper(Visualizer):
             i += 1
             stop = i >= len(base_components)
 
-        import IPython
-        IPython.embed()
         return conv_components, base_components, d_areas
 
 
@@ -106,7 +100,7 @@ class Shaper(Visualizer):
 class MaskBoundManager:
     counter: np.array
     sizes: np.array
-    mask: Dict[int, np.array]
+    mask: np.ndarray
 
     def __len__(self):
         return self.counter.shape[0]
@@ -138,4 +132,6 @@ class MaskBoundManager:
         # Imitate pop of FG component
         self.counter = np.array([c for j, c in enumerate(self.counter) if j != i])
         self.sizes = np.array([s for j, s in enumerate(self.sizes) if j != i])
-        self.mask = np.stack([ax_mask for j, ax_mask in enumerate(self.mask) if j != i])
+        l_masks, self.mask = [ax_mask for j, ax_mask in enumerate(self.mask) if j != i], None
+        if l_masks:
+            self.mask = np.stack(l_masks)
