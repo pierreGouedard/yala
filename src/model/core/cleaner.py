@@ -5,7 +5,7 @@ import numpy as np
 
 # Local import
 from src.model.utils.firing_graph import YalaFiringGraph
-from src.model.utils.linalg import expand, bounds
+from src.model.utils.spmat_op import expand, bounds
 
 
 class Cleaner:

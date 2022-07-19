@@ -16,6 +16,26 @@ class BitMap:
     nb: int
     nf: int
 
+    def __len__(self):
+        return self.bf_map.shape[1]
+
+    def __iter__(self):
+        self.__idx = 0
+        return self
+
+    def __next__(self):
+        if self.__idx >= len(self):
+            raise StopIteration
+
+        _next = self[self.__idx]
+        self.__idx += 1
+
+        return _next
+
+    def __getitem__(self, i):
+        assert isinstance(i, int), 'index should be an integer'
+        return self.bf_map[:, i]
+
     @lru_cache()
     def feature_card(self, n_repeat):
         return self.bf_map.sum(axis=0).A[[0] * n_repeat, :]
