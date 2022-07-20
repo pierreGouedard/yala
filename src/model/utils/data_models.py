@@ -159,7 +159,7 @@ class ConvexHullProba:
 
         ax_p = ~ax_support_bounds / ax_counts
 
-        return ax_p / ax_p.sum(axis=1)
+        return ax_p / ax_p.sum(axis=1)[:, np.newaxis]
 
     def add(self, comp: FgComponents, bitmap: BitMap):
         if self.counts is None:

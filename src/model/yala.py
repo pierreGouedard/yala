@@ -1,5 +1,4 @@
 # Global import
-from numpy import ones
 
 # Local import
 from src.model.core.server import YalaUnclassifiedServer, YalaMisclassifiedServer
@@ -76,26 +75,6 @@ class Yala(object):
         else:
             raise NotImplementedError
 
-        ## TODO: Again here we are going through a fundamental refactor of the procedure:
-        ##  in this new procedure we will:
-        #       1- "move" 1 bound at a time DONE
-        #       2- optimize the cleaner so no draining is necessary + remove 1 bound at a time DONE
-        #       3- Make sure the Integrity of convex component is preserved at all time TODO
-        #
-        #   Task 1:
-        #       Refactor the cleaner - DONE
-        #   Task 2:
-        #       Refactor the Yala drainer so it handle the logic of 1 at a time => TOTEST
-        #   Task 3:
-        #       Refactor Yala drainer so it handle the preservation of integrity of convex component => TODO
-        #   Task 4:
-        #       Change & adapt the core of YALA (this file, basically) => TOTEST
-
-        # TODO - as we implement connex from linalg:
-        #   - make use of linalg.axpand in init_sample from sampler
-        #   - expand => expand by features, not all together
-        #   - that all folks.
-
         shaper = Shaper(
             self.server, self.bitmap, self.drainer_params, min_firing=self.min_firing,
             perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True,
@@ -109,7 +88,7 @@ class Yala(object):
             print("[YALA]: Iteration {}".format(i))
 
             # Initial sampling
-            base_components = sampler.init_sample(self.n_parallel, window_length=7)
+            base_components = sampler.init_sample(self.n_parallel, n_bits=7)
 
             # Instantiate tracking
             tracker = Tracker(
