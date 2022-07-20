@@ -1,18 +1,16 @@
 # Global import
-from scipy.sparse import csc_matrix
 import numpy as np
 import unittest
 
 # Local import
 from src.model.core.server import YalaUnclassifiedServer
-from src.model.core.firing_graph import YalaFiringGraph
 from src.model.core.encoder import MultiEncoders
-from src.model.core.data_models import BitMap
-from src.model.core.cleaner import Cleaner
-from src.model.utils import init_sample
+from src.model.utils.data_models import BitMap
+from src.model.core.sampler import Sampler
+from tests.units.utils import PerfPlotter
 
 
-class TestCleaner(unittest.TestCase):
+class TestSampler(unittest.TestCase):
 
     def setUp(self):
         # Create datasets
@@ -20,82 +18,49 @@ class TestCleaner(unittest.TestCase):
         self.basis = np.vstack([np.cos(np.arange(0, np.pi, 0.2)), np.sin(np.arange(0, np.pi, 0.2))])
         self.augmented_features = self.origin_features.dot(self.basis) * 100
         self.targets = np.zeros(self.origin_features.shape[0])
+        self.n_bounds = 2
+
+        # Instantiate visualizer
+        self.perf_plotter = PerfPlotter(
+            self.origin_features, self.targets, list(range(len(self.targets)))
+        )
 
         # Build model's element
         self.encoder = MultiEncoders(50, 'quantile', bin_missing=False)
         X_enc, y_enc = self.encoder.fit_transform(X=self.augmented_features, y=self.targets)
         self.server = YalaUnclassifiedServer(X_enc, y_enc).stream_features()
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
-        self.cleaner = Cleaner(self.server, self.bitmap, 3000)
+        self.sampler = Sampler(self.server, self.bitmap, n_bounds=self.n_bounds)
 
-        # Build test components
-        self.test_component = init_sample(1, 2, self.server, self.bitmap, window_length=10)
-        self.test_component_ch = YalaFiringGraph.from_fg_comp(self.test_component)\
-            .get_convex_hull(self.server, 3000)
-
-        print("======= Test component input ======= ")
-        print(self.bitmap.b2f(self.test_component.inputs).A)
-        print("======= Test component CH input ======= ")
-        print(self.bitmap.b2f(self.test_component_ch.inputs).A)
-
-    def sample(self, n):
-        # Select 1 additional bound to clean
-        ind_mask = list(np.random.choice(np.arange(self.bitmap.nf), size=n, replace=False))
-        sax_inputs = csc_matrix(self.bitmap.bf_map[:, ind_mask].sum(axis=1)).multiply(self.test_component_ch.inputs)
-        return sax_inputs + self.test_component.inputs[:, 0]
-
-    def test_one_to_clean(self):
+    def test_init_sample(self):
         """
-        python -m unittest tests.units.test_cleaner.TestCleaner.test_one_to_clean
+        python -m unittest tests.units.test_sampler.TestSampler.test_init_sample
 
         """
-        # Select 1 additional bound to clean
-        sax_inputs = self.sample(1)
-        print("======= CH sampled ======= ")
-        print(self.bitmap.b2f(sax_inputs).A)
+        comp_sampled = self.sampler.init_sample(3, n_bits=10)
 
-        # Clean component
-        clean_component = self.cleaner.clean_component(
-            self.test_component_ch.copy(inputs=sax_inputs, levels=np.ones(1) * 3)
-        )
+        # Assert that number of bound is correct
+        self.assertTrue((self.bitmap.b2f(comp_sampled.inputs.astype(bool)).A.sum(axis=1) == self.n_bounds).all())
 
-        self.assertTrue(
-            (self.bitmap.b2f(self.test_component.inputs > 0).A == self.bitmap.b2f(clean_component.inputs > 0).A).all()
-        )
-        self.assertTrue((clean_component.levels == self.test_component.levels).all())
+        # Assert for each vertices / boundsthere is at least 6 bit, at most 11 bit that are non null
+        for i, comp in enumerate(comp_sampled):
+            ax_cnt_features = self.bitmap.b2f(comp.inputs).A[0, :]
+            self.assertTrue((ax_cnt_features[ax_cnt_features > 0] >= 6).all())
+            self.assertTrue((ax_cnt_features[ax_cnt_features > 0] <= 11).all())
 
-    def test_two_to_clean(self):
+    def test_sample_bounds(self):
         """
-        python -m unittest tests.units.test_cleaner.TestCleaner.test_two_to_clean
+        python -m unittest tests.units.test_sampler.TestSampler.test_sample_bounds
 
         """
-        # Select 2 additional bound to clean
-        sax_inputs = self.sample(2)
-        print("======= CH sampled ======= ")
-        print(self.bitmap.b2f(sax_inputs).A)
+        # Init samples
+        comp_sampled = self.sampler.init_sample(3, n_bits=10)
 
-        # Clean component
-        clean_component = self.cleaner.clean_component(
-            self.test_component_ch.copy(inputs=sax_inputs, levels=np.ones(1) * 4)
-        )
+        # Sample additional bounds
+        comp_test = self.sampler.sample_bounds(comp_sampled.copy(), 10000)
 
-        self.assertTrue(
-            (self.bitmap.b2f(self.test_component.inputs > 0).A == self.bitmap.b2f(clean_component.inputs > 0).A).all()
-        )
-        self.assertTrue((clean_component.levels == self.test_component.levels).all())
+        # Assert that number of bound is correct
+        ax_cnt_bounds_test = self.bitmap.b2f(comp_test.inputs.astype(bool)).A.sum(axis=1)
+        ax_cnt_bounds_sampled = self.bitmap.b2f(comp_sampled.inputs.astype(bool)).A.sum(axis=1)
+        self.assertTrue((ax_cnt_bounds_test == ax_cnt_bounds_sampled + self.n_bounds).all())
 
-    def test_random_to_clean(self):
-        """
-        python -m unittest tests.units.test_cleaner.TestCleaner.test_random_to_clean
-
-        """
-        # Select n random additional bound to clean
-        n = np.random.randint(3, 8, 1)
-        sax_inputs = self.sample(n)
-        print("======= CH sampled ======= ")
-        print(self.bitmap.b2f(sax_inputs).A)
-
-        # Clean component
-        clean_component = self.cleaner.clean_component(
-            self.test_component_ch.copy(inputs=sax_inputs, levels=np.ones(1) * 4)
-        )

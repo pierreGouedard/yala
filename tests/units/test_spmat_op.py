@@ -9,7 +9,7 @@ from src.model.core.sampler import Sampler
 from src.model.core.encoder import MultiEncoders
 from src.model.utils.data_models import BitMap
 from src.model.utils.data_models import FgComponents
-from src.model.utils.spmat_op import shrink, expand, bounds, connex
+from src.model.utils.spmat_op import shrink, expand, bounds, add_connex
 
 
 class TestSpmatOp(unittest.TestCase):
