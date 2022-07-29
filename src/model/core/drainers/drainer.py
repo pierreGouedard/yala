@@ -6,6 +6,7 @@ from scipy.sparse import diags
 # Local import
 from src.model.core.drainers.utils import init_parameters
 from src.model.utils.firing_graph import YalaFiringGraph, YalaTopPattern
+from src.model.utils.spmat_op import add_connex
 
 
 class YalaDrainer(FiringGraphDrainer):
@@ -55,9 +56,9 @@ class YalaDrainer(FiringGraphDrainer):
     def select(self, **kwargs):
         # Get active & drained bits
         sax_active_inputs = self.select_inputs(self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
-        sax_support_bits = sax_active_inputs + self.base_component.inputs
 
-        # TODO: Add layer so that the integrity & convexity of base is preserved (no hole) <= So important
+        # Add connexe new inputs
+        sax_support_bits = add_connex(self.base_component.inputs, sax_active_inputs, self.bitmap)
 
         # Build component
         self.base_component.update(inputs=sax_support_bits)

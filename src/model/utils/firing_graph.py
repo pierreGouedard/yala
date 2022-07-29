@@ -7,6 +7,7 @@ from scipy.sparse import lil_matrix, hstack, eye, spmatrix
 from firing_graph.data_structure.graph import FiringGraph
 from firing_graph.data_structure.utils import create_empty_matrices, set_matrices_spec
 from src.model.utils.data_models import FgComponents
+from src.model.utils.spmat_op import fill_gap
 
 
 class YalaFiringGraph(FiringGraph):
@@ -47,7 +48,7 @@ class YalaFiringGraph(FiringGraph):
 
         return YalaFiringGraph(**kwargs)
 
-    def get_convex_hull(self, server, n, mask=None):
+    def get_convex_hull(self, server, n, bitmap, mask=None):
         # Get masked activations
         sax_x = server.next_forward(n=n, update_step=False).sax_data_forward
 
@@ -60,7 +61,9 @@ class YalaFiringGraph(FiringGraph):
         if mask is not None:
             sax_product = sax_product.multiply(mask)
 
-        return FgComponents(inputs=sax_product, levels=np.ones(sax_fg.shape[1]), partitions=self.partitions)
+        return FgComponents(
+            inputs=fill_gap(sax_product, bitmap), levels=np.ones(sax_fg.shape[1]), partitions=self.partitions
+        )
 
 
 class YalaTopPattern(FiringGraph):

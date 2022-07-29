@@ -1,7 +1,5 @@
 # Global import
-from scipy.sparse import csc_matrix, lil_matrix
-import numpy as np
-from scipy.signal import convolve2d
+from scipy.sparse import lil_matrix
 from itertools import groupby
 from operator import itemgetter
 
@@ -74,15 +72,18 @@ def bounds(sax_inputs, bitmap):
 
 
 def add_connex(sax_base, sax_inputs, bitmap):
-    
+
     ax_mask = (bitmap.b2f(sax_inputs.astype(int)).sum(axis=0).A[0, :] > 0)
     l_linds, l_cinds = [], []
     for i, sax_mask in enumerate(bitmap):
         if ax_mask[i]:
-            d_base_bounds = {
-                c: (min(ls, key=itemgetter(1))[1], max(ls, key=itemgetter(1))[1])
-                for c, ls in groupby(zip(*sax_base.multiply(sax_mask).nonzero()))
-            }
+
+            # Init base bounds
+            d_base_bounds = {}
+            for c, it_sub_inds in groupby(zip(*sax_base.multiply(sax_mask).nonzero()), itemgetter(1)):
+                l_sub_inds = [t[0] for t in it_sub_inds]
+                d_base_bounds[c] = (min(l_sub_inds), max(l_sub_inds))
+
             it = groupby(zip(*sax_inputs.multiply(sax_mask).nonzero()), itemgetter(1))
             for cind, l_sub_inds in it:
                 # Get line indices
@@ -91,24 +92,47 @@ def add_connex(sax_base, sax_inputs, bitmap):
                 # Left bound
                 cur_ind, k = d_base_bounds[cind][0], 1
                 while k is not None:
-                    if cur_ind - k in l_sub_inds:
+                    if cur_ind - k in l_sub_linds:
                         l_linds.append(cur_ind - k)
-                        k -= 1
+                        l_cinds.append(cind)
+                        k += 1
                     else:
                         break
 
                 # Right bound
                 cur_ind, k = d_base_bounds[cind][1], 1
                 while k is not None:
-                    if cur_ind + k in l_sub_inds:
+                    if cur_ind + k in l_sub_linds:
                         l_linds.append(cur_ind + k)
+                        l_cinds.append(cind)
                         k += 1
                     else:
                         break
 
+    # Update sp matrix
+    if l_linds:
+        sax_base = sax_base.tolil()
+        sax_base[l_linds, l_cinds] = 1
+
+    return sax_base
+
+
+def fill_gap(sax_inputs, bitmap):
+    ax_mask = (bitmap.b2f(sax_inputs.astype(int)).sum(axis=0).A[0, :] > 0)
+    l_linds, l_cinds = [], []
+    for i, sax_mask in enumerate(bitmap):
+        if ax_mask[i]:
+            it = groupby(zip(*sax_inputs.multiply(sax_mask).nonzero()), itemgetter(1))
+            for cind, l_sub_inds in it:
+                # Get all index between bounds
+                l_sub_linds = list(map(itemgetter(0), l_sub_inds))
+                l_sub_linds = list(range(min(l_sub_linds), max(l_sub_linds) + 1))
+
+                # Extend list of indices to set to 1
+                l_linds.extend(l_sub_linds)
                 l_cinds.extend([cind] * len(l_sub_linds))
 
-    # Updat sp matrix
+    # Update sp matrix
     sax_inputs = sax_inputs.tolil()
     sax_inputs[l_linds, l_cinds] = 1
 
