@@ -48,7 +48,7 @@ class Sampler:
     def sample_bounds(self, base_components, batch_size):
         # Get convex components
         ch_components = YalaFiringGraph.from_fg_comp(base_components) \
-            .get_convex_hull(self.server, batch_size)
+            .get_convex_hull(self.server, batch_size, self.bitmap)
 
         # Sample new bounds from CH
         sax_sampled = csc_matrix(self.sample_from_proba(base_components).T)

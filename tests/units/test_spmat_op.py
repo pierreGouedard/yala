@@ -1,5 +1,5 @@
 # Global import
-from scipy.sparse import csc_matrix
+from scipy.sparse import csc_matrix, lil_matrix
 import numpy as np
 import unittest
 
@@ -13,6 +13,8 @@ from src.model.utils.spmat_op import shrink, expand, bounds, add_connex
 
 
 class TestSpmatOp(unittest.TestCase):
+    n_vertices = 2
+
     def setUp(self):
         # Create datasets
         self.origin_features = np.random.randn(20000, 2)
@@ -28,12 +30,22 @@ class TestSpmatOp(unittest.TestCase):
 
         # Build test components
         self.test_components = self.build_random_comp()
+        self.test_conn_components = self.build_conn_comp()
 
         print("======= Test component input ======= ")
         print(self.bitmap.b2f(self.test_components.inputs).A)
+        print("======= Test conn component input ======= ")
+        print(self.bitmap.b2f(self.test_conn_components.inputs).A)
 
     def build_random_comp(self):
-        return self.sampler.init_sample(2, window_length=8)
+        return self.sampler.init_sample(2, n_bits=self.n_vertices)
+
+    def build_conn_comp(self):
+        sax_inputs = csc_matrix((self.bitmap.nb, self.n_vertices))
+        sax_inputs[[125, 126, 127, 215, 216, 217], [0, 0, 0, 0, 0, 0]] = 1
+        sax_inputs[[524, 525, 526, 527, 615, 616, 617], [1, 1, 1, 1, 1, 1, 1]] = 1
+
+        return FgComponents(inputs=sax_inputs, levels=np.array([2, 2]), partitions=[{}, {}])
 
     def test_expand(self):
         """
@@ -94,10 +106,41 @@ class TestSpmatOp(unittest.TestCase):
                 if ax_test_features[j, i]:
                     self.assertEqual(sax_bounds_inputs[:, j].multiply(sax_mask).nnz, 2)
 
-    def test_connex(self):
+    def test_add_connex(self):
         """
-        python -m unittest tests.units.test_spmat_op.TestSpmatOp.test_connex
+        python -m unittest tests.units.test_spmat_op.TestSpmatOp.test_add_connex
 
         """
-        pass
+        ax_rnz, ax_cnz = self.test_conn_components.inputs.nonzero()
+        l_bounds = [(ax_rnz[ax_cnz == i].min(), ax_rnz[ax_cnz == i].max()) for i in range(self.n_vertices)]
+
+        # First test with nothing to add
+        sax_inputs = csc_matrix(self.test_conn_components.inputs.shape)
+        sax_result = add_connex(self.test_conn_components.inputs.copy(), sax_inputs, self.bitmap)
+        self.assertTrue(all([
+            self.test_conn_components.inputs[:, i].nnz == sax_result[:, i].nnz for i in range(self.n_vertices)
+        ]))
+
+        # Second: test with disconnected part
+        sax_inputs = lil_matrix(self.test_conn_components.inputs.shape)
+        for i in range(self.n_vertices):
+            sax_inputs[[l_bounds[i][0] - 2, l_bounds[i][0] - 3, l_bounds[i][0] - 4], i] = 1
+            sax_inputs[[l_bounds[i][1] + 2, l_bounds[i][1] + 3, l_bounds[i][1] + 4], i] = 1
+
+        sax_result = add_connex(self.test_conn_components.inputs.copy(), sax_inputs.tocsc(), self.bitmap)
+
+        self.assertTrue(all([
+            self.test_conn_components.inputs[:, i].nnz == sax_result[:, i].nnz for i in range(self.n_vertices)
+        ]))
+
+        # Finally test with some connect part and some unconnected
+        sax_inputs = lil_matrix(self.test_conn_components.inputs.shape)
+        for i in range(self.n_vertices):
+            sax_inputs[[l_bounds[i][0] - 1, l_bounds[i][0] - 2, l_bounds[i][0] - 4], i] = 1
+            sax_inputs[[l_bounds[i][1] + 1, l_bounds[i][1] + 2, l_bounds[i][1] + 4], i] = 1
+
+        sax_result = add_connex(self.test_conn_components.inputs.copy(), sax_inputs.tocsc(), self.bitmap)
+        self.assertTrue(all([
+            self.test_conn_components.inputs[:, i].nnz + 4 == sax_result[:, i].nnz for i in range(self.n_vertices)
+        ]))
 

@@ -36,9 +36,9 @@ class TestCleaner(unittest.TestCase):
         self.sampler = Sampler(self.server, self.bitmap)
 
         # Build test components
-        self.test_component = self.sampler.init_sample(1, window_length=10)
+        self.test_component = self.sampler.init_sample(1, n_bits=10)
         self.test_component_ch = YalaFiringGraph.from_fg_comp(self.test_component)\
-            .get_convex_hull(self.server, 3000)
+            .get_convex_hull(self.server, 3000, self.bitmap)
 
         print("======= Test component input ======= ")
         print(self.bitmap.b2f(self.test_component.inputs).A)
