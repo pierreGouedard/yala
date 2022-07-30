@@ -64,6 +64,10 @@ class FgComponents:
     def empty_comp():
         return FgComponents(csc_matrix((0, 0)), [], np.empty((0,)))
 
+    @property
+    def empty(self):
+        return len(self.levels) == 0
+
     def __iter__(self):
         self.__idx = 0
         return self

@@ -57,17 +57,6 @@ class Visualizer(YalaDrainer):
             plt.legend()
             plt.show()
 
-    def visualize_fg(self, firing_graph):
-        if self.plot_perf_enabled is None:
-            raise ValueError('Impossible to visualize firing graph: not plot perf.')
-
-        # Get masked activations
-        sax_x = self.server.get_sub_forward(self.perf_plotter.indices)
-        ax_yhat = firing_graph.propagate(sax_x).A
-
-        # Plot perf viz
-        self.perf_plotter(ax_yhat)
-
     def visualize_comp(self, components):
         if self.plot_perf_enabled is None:
             raise ValueError('Impossible to visualize firing graph: not plot perf.')

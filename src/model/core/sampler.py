@@ -52,11 +52,12 @@ class Sampler:
 
         # Sample new bounds from CH
         sax_sampled = csc_matrix(self.sample_from_proba(base_components).T)
+        ch_components.update(inputs=ch_components.inputs.multiply(self.bitmap.f2b(sax_sampled)))
 
         # Update base component's bounds
         base_components = base_components.update(
-            inputs=base_components.inputs + ch_components.inputs.multiply(self.bitmap.f2b(sax_sampled)),
-            levels=base_components.levels + sax_sampled.sum(axis=1)
+            inputs=base_components.inputs + ch_components.inputs,
+            levels=base_components.levels + sax_sampled.sum(axis=0).A[0, :]
         )
 
         # Update bounds proba

@@ -54,7 +54,6 @@ class Tracker:
                 components.pop(i)
                 stop = i >= len(components)
                 self.components += comp
-                print(self.components)
                 continue
 
             i += 1

@@ -12,7 +12,7 @@ from tests.units.utils import PerfPlotter
 class TestHardShape(unittest.TestCase):
     show_dataset = True
     p_yala = {
-        'draining_margin': 0.05, 'n_parallel': 1, 'init_level': 3, 'n_update': 2, 'draining_size': 10000,
+        'draining_margin': 0.05, 'n_parallel': 2, 'init_level': 3, 'n_update': 2, 'draining_size': 10000,
         'batch_size': 5000, 'min_firing': 100, 'dropout_rate_mask': 0.99, 'n_run': 100, 'n_bin': 50,
         'bin_method': 'quantile', 'bin_missing': False
     }

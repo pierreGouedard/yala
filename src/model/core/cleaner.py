@@ -26,7 +26,7 @@ class Cleaner:
         msk_fg = YalaFiringGraph.from_fg_comp(msk_comp)
 
         # Create comps
-        sax_mask = expand(components.inputs, self.bitmap, n=2).astype(bool)
+        sax_mask = expand(components.inputs.copy(), self.bitmap, n=2).astype(bool)
         xpld_comp = components.complement(sax_mask).explode(self.bitmap)
         xpld_fg = YalaFiringGraph.from_fg_comp(xpld_comp)
 

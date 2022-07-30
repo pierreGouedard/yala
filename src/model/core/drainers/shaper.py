@@ -44,12 +44,12 @@ class Shaper(Visualizer):
         while len(base_components) > 0:
             # Shrink bound to drain
             sax_drain_inputs = base_components.inputs.multiply(self.mask_bound_manager.get_drain_bmask())
-            sax_shrink_inputs = shrink(sax_drain_inputs, self.bitmap, n_shrink)
+            sax_shrink_inputs = shrink(sax_drain_inputs.copy(), self.bitmap, n_shrink)
 
             drain_components = FgComponents(
                 inputs=sax_shrink_inputs, levels=np.ones(len(self.mask_bound_manager)),
                 partitions=base_components.partitions
-            ).complement(sax_mask=expand(sax_drain_inputs, self.bitmap, n=n_expand))
+            ).complement(sax_mask=expand(sax_shrink_inputs.copy(), self.bitmap, n=n_expand + n_shrink))
 
             # Update base component by replacing current bound with the shrinked one.
             sax_cmplmnt_inputs = base_components.inputs.multiply(self.mask_bound_manager.get_drain_cmplmnt_bmask())
@@ -65,6 +65,10 @@ class Shaper(Visualizer):
 
             if self.advanced_plot_perf_enabled:
                 self.visualize_shaping(drain_components, mask_components, base_components)
+                resp = input('ipython?')
+                if resp == 'y':
+                    import IPython
+                    IPython.embed()
 
             self.mask_bound_manager.decrement()
             conv_components, base_components, d_areas = self.pop_conv_comp(base_components, conv_components, d_areas)
@@ -84,15 +88,18 @@ class Shaper(Visualizer):
                     base_components.pop(i)
                     self.mask_bound_manager.pop(i)
                     d_areas.pop(comp.partitions[0]['id'])
+                    print(f'{i} poped')
                 else:
                     self.mask_bound_manager.reset(i)
                     d_areas[comp.partitions[0]['id']] = comp.partitions[0]['area']
+                    i += 1
+
             else:
                 d_areas[comp.partitions[0]['id']] = comp.partitions[0]['area']
+                i += 1
 
-            i += 1
             stop = i >= len(base_components)
-
+        print(d_areas)
         return conv_components, base_components, d_areas
 
 
