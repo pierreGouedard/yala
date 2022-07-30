@@ -57,7 +57,7 @@ class YalaDrainer(FiringGraphDrainer):
         # Get active & drained bits
         sax_active_inputs = self.select_inputs(self.firing_graph.Iw, self.firing_graph.backward_firing['i'])
 
-        # Add connexe new inputs
+        # Add connex new inputs
         sax_support_bits = add_connex(self.base_component.inputs, sax_active_inputs, self.bitmap)
 
         # Build component

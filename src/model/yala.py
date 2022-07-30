@@ -78,7 +78,7 @@ class Yala(object):
         shaper = Shaper(
             self.server, self.bitmap, self.drainer_params, min_firing=self.min_firing,
             perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True,
-            advanced_plot_perf_enabled=True
+            advanced_plot_perf_enabled=False
         )
         cleaner = Cleaner(self.server, self.bitmap, self.drainer_params.batch_size)
         sampler = Sampler(self.server, self.bitmap)
@@ -109,22 +109,17 @@ class Yala(object):
                 # Check for component that has converged
                 base_components = tracker.swap_components(base_components)
 
+                # exit loop if all comp have merged
+                if base_components.empty:
+                    break
+
                 # Resample new bounds for base components that have not converged yet
                 sampler.sample_bounds(base_components, self.drainer_params.batch_size)
 
+                # Visualize training
+                i += 1
                 if i % 5 == 0:
                     tracker.visualize_indicators()
-                    if base_components is not None:
-                        shaper.visualize_comp(base_components)
-                    resp = input('would you like to activate visualisation now ?')
-                    if resp == "yes":
-                        shaper.plot_perf_enabled = True
-                        shaper.advanced_plot_perf_enabled = True
-
-                i += 1
-
-                if base_components is None:
-                    break
 
             tracker.visualize_indicators()
             complete_components = tracker.components
