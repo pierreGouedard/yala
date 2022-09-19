@@ -4,8 +4,8 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 # Local import
-from src.model.utils.firing_graph import YalaFiringGraph
-from src.model.utils.spmat_op import expand, bounds
+from .firing_graph import YalaFiringGraph
+from yala.linalg.spmat_op import expand, bounds
 
 
 class Cleaner:

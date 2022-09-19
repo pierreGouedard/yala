@@ -1,4 +1,4 @@
-"""All classes that specify data structures."""
+"""All core that specify data structures."""
 # Global import
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass

@@ -4,23 +4,23 @@ from dataclasses import dataclass
 from scipy.sparse import csc_matrix, hstack as sphstack
 
 # Local import
-from src.model.utils.data_models import FgComponents
-from src.model.core.drainers.visualizer import Visualizer
-from src.model.utils.spmat_op import expand, shrink
+from yala.utils.data_models import FgComponents
+from .visualizer import Visualizer
+from yala.linalg.spmat_op import expand, shrink
 
 
 class Shaper(Visualizer):
     """Shaper"""
 
     def __init__(
-            self, server, bitmap, drainer_params, min_firing=100, min_bounds=2, perf_plotter=None,
+            self, server, bitmap, drainer_params, min_bounds=2, perf_plotter=None,
             plot_perf_enabled=False, advanced_plot_perf_enabled=False
     ):
         # call parent constructor
         self.mask_bound_manager = None
 
         super().__init__(
-            server, bitmap, drainer_params, min_firing, min_bounds, perf_plotter=perf_plotter,
+            server, bitmap, drainer_params, min_bounds, perf_plotter=perf_plotter,
             plot_perf_enabled=plot_perf_enabled, advanced_plot_perf_enabled=advanced_plot_perf_enabled
         )
 

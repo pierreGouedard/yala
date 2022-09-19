@@ -2,14 +2,14 @@
 from matplotlib import pyplot as plt
 
 # Local import
-from src.model.utils.firing_graph import YalaFiringGraph
-from src.model.core.drainers.drainer import YalaDrainer
+from yala.firing_graph import YalaFiringGraph
+from .drainer import YalaDrainer
 
 
 class Visualizer(YalaDrainer):
     """Visual"""
     def __init__(
-            self, server, bitmap, drainer_params, min_firing=100, n_bounds=2, perf_plotter=None,
+            self, server, bitmap, drainer_params, n_bounds=2, perf_plotter=None,
             plot_perf_enabled=False, advanced_plot_perf_enabled=False
     ):
         # Get visualisation parameters
@@ -18,7 +18,7 @@ class Visualizer(YalaDrainer):
         self.advanced_plot_perf_enabled = advanced_plot_perf_enabled
 
         # Call parent constructor
-        super().__init__(server, bitmap, drainer_params, min_firing, n_bounds)
+        super().__init__(server, bitmap, drainer_params, n_bounds)
 
     def visualize_shaping(self, drain_components, mask_components, base_components):
         sax_x = self.server.get_sub_forward(self.perf_plotter.indices)

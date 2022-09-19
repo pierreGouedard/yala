@@ -1,0 +1,12 @@
+# Create env: conda env create -f dev-env.yaml
+name: yala-env
+dependencies:
+  - python==3.10
+  - ipython
+  - pip
+  - pip:
+    - numpy==1.23.0
+    - scipy==1.9.1
+    - matplotlib==3.5.2
+    - pytest==7.1.3
+    - pandas==1.4.4

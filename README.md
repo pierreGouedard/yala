@@ -16,7 +16,7 @@ line operation will be described on Ubunutu
   and a conda environment config file can be found  at the root of the ml-analysis project (with ubuntu / conda):
     
     cd ~/yala
-    conda env create -f environment.yml
+    conda env create -f dev-env.yaml
   
   * **Install firing_graph package on your local computer**
   

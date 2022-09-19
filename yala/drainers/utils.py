@@ -2,10 +2,10 @@
 import numpy as np
 
 # Local import
-from src.model.utils.data_models import DrainerFeedbacks
+from yala.utils.data_models import DrainerFeedbacks
 
 
-def init_parameters(drainer_params, min_firing):
+def init_parameters(drainer_params, min_feedback=5):
 
     # Get params
     ax_precision, margin = drainer_params.precisions, drainer_params.margin
@@ -16,7 +16,7 @@ def init_parameters(drainer_params, min_firing):
     drainer_params.feedbacks = DrainerFeedbacks(penalties=ax_p, rewards=ax_r)
 
     # Compute weights
-    drainer_params.weights = ((ax_p - ((ax_precision - margin) * (ax_p + ax_r))) * min_firing).astype(int) + 1
+    drainer_params.weights = ((ax_p - ((ax_precision - margin) * (ax_p + ax_r))) * min_feedback).astype(int) + 1
 
     return drainer_params
 
