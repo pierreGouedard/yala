@@ -1,13 +1,13 @@
 # Global imports
 import numpy as np
 from itertools import groupby
-from scipy.sparse import lil_matrix, hstack, eye, spmatrix
+from scipy.sparse import eye
 
 # Local import
-from firing_graph.data_structure.graph import FiringGraph
-from firing_graph.data_structure.utils import create_empty_matrices, set_matrices_spec
-from src.model.utils.data_models import FgComponents
-from src.model.utils.spmat_op import fill_gap
+from firing_graph.graph import FiringGraph
+from firing_graph.graph import create_empty_matrices
+from yala.utils.data_models import FgComponents
+from yala.linalg.spmat_op import fill_gap
 
 
 class YalaFiringGraph(FiringGraph):

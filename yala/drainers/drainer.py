@@ -4,14 +4,14 @@ from firing_graph.solver.drainer import FiringGraphDrainer
 from scipy.sparse import diags
 
 # Local import
-from src.model.core.drainers.utils import init_parameters
-from src.model.utils.firing_graph import YalaFiringGraph, YalaTopPattern
-from src.model.utils.spmat_op import add_connex
+from .utils import init_parameters
+from yala.firing_graph import YalaFiringGraph, YalaTopPattern
+from yala.linalg.spmat_op import add_connex
 
 
 class YalaDrainer(FiringGraphDrainer):
     """Abstract child of Firing Graph specific to YALA algorithm."""
-    def __init__(self, server, bitmap, drainer_params, min_firing=100, min_bounds=2):
+    def __init__(self, server, bitmap, drainer_params, min_bounds=2):
         # Map bit to features and candidate features
         self.bitmap = bitmap
 
@@ -19,7 +19,6 @@ class YalaDrainer(FiringGraphDrainer):
         self.drainer_params = drainer_params
 
         # complement attributes
-        self.min_firing = min_firing
         self.min_bounds = min_bounds
 
         # Handy
@@ -90,7 +89,7 @@ class YalaDrainer(FiringGraphDrainer):
         self.drainer_params.precisions = ax_precisions.max(axis=0)
 
         # Compute penalty / rewards
-        self.drainer_params = init_parameters(self.drainer_params, self.min_firing)
+        self.drainer_params = init_parameters(self.drainer_params)
         self.update_pr(**asdict(self.drainer_params.feedbacks))
 
         # Update base matrix input's weights

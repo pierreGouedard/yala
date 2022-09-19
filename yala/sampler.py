@@ -5,9 +5,9 @@ from string import ascii_uppercase
 from scipy.sparse import csc_matrix
 
 # Local import
-from src.model.utils.data_models import ConvexHullProba, FgComponents
-from src.model.utils.firing_graph import YalaFiringGraph
-from src.model.utils.spmat_op import expand
+from yala.utils.data_models import ConvexHullProba, FgComponents
+from .firing_graph import YalaFiringGraph
+from yala.linalg.spmat_op import expand
 
 
 class Sampler:

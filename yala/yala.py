@@ -1,13 +1,13 @@
 # Global import
 
 # Local import
-from src.model.core.server import YalaUnclassifiedServer, YalaMisclassifiedServer
-from src.model.utils.data_models import DrainerParameters, TrackerParameters, BitMap
-from src.model.core.encoder import MultiEncoders
-from src.model.core.drainers.shaper import Shaper
-from src.model.core.cleaner import Cleaner
-from src.model.core.tracker import Tracker
-from src.model.core.sampler import Sampler
+from firing_graph.servers import ArrayServer
+from yala.utils.data_models import DrainerParameters, TrackerParameters, BitMap
+from .encoder import MultiEncoders
+from .drainers.shaper import Shaper
+from .cleaner import Cleaner
+from .tracker import Tracker
+from .sampler import Sampler
 
 
 class Yala(object):
@@ -19,13 +19,9 @@ class Yala(object):
                  draining_size=500,
                  draining_margin=0.05,
                  n_parallel=50,
-                 init_level=1,
                  n_update=1,
-                 dropout_rate_mask=0.2,
-                 min_firing=10,
                  min_delta_area=0.05,
                  max_no_changes=3,
-                 server_type='unclassified',
                  n_bin=10,
                  bin_method='quantile',
                  bin_missing=False,
@@ -34,15 +30,11 @@ class Yala(object):
         self.n_run = n_run
         self.max_iter = max_iter
         self.n_parallel = n_parallel
-        self.init_level = init_level
         self.n_update = n_update
-        self.min_firing = min_firing
 
         # Encoder params
         self.encoder = MultiEncoders(n_bin, bin_method, bin_missing=bin_missing)
-
-        # Server params
-        self.server_type, self.dropout_rate_mask, self.server = server_type, dropout_rate_mask, None
+        self.server = None
 
         # Drainer params
         self.drainer_params = DrainerParameters(total_size=draining_size, batch_size=batch_size, margin=draining_margin)
@@ -64,26 +56,15 @@ class Yala(object):
         # encode: X is a numpy/scipy array, y in numpy/scipy array
         X_enc, y_enc = self.encoder.fit_transform(X=X, y=y)
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
-
-        # Instantiate core components
-        if self.server_type == 'unclassified':
-            self.server = YalaUnclassifiedServer(X_enc, y_enc, dropout_rate_mask=self.dropout_rate_mask)\
-                .stream_features()
-        elif self.server_type == 'misclassified':
-            self.server = YalaMisclassifiedServer(X_enc, y_enc, dropout_rate_mask=self.dropout_rate_mask)\
-                .stream_features()
-        else:
-            raise NotImplementedError
+        self.server = ArrayServer(X_enc, y_enc).stream_features()
 
         shaper = Shaper(
-            self.server, self.bitmap, self.drainer_params, min_firing=self.min_firing,
-            perf_plotter=kwargs.get('perf_plotter', None), plot_perf_enabled=True,
-            advanced_plot_perf_enabled=False
+            self.server, self.bitmap, self.drainer_params, perf_plotter=kwargs.get('perf_plotter', None),
+            plot_perf_enabled=True, advanced_plot_perf_enabled=False
         )
         cleaner = Cleaner(self.server, self.bitmap, self.drainer_params.batch_size)
         sampler = Sampler(self.server, self.bitmap)
 
-        n_ch_candidate = 2
         for i in range(self.n_run):
             print("[YALA]: Iteration {}".format(i))
 
