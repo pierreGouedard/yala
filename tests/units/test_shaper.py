@@ -1,20 +1,19 @@
 # Global import
-from scipy.sparse import csc_matrix
 import numpy as np
 import unittest
 import matplotlib.pyplot as plt
 
 # Local import
-from src.model.core.server import YalaUnclassifiedServer
-from src.model.core.drainers.shaper import Shaper
-from src.model.core.encoder import MultiEncoders
-from src.model.utils.data_models import BitMap, DrainerParameters
-from src.model.utils.data_models import FgComponents
-from src.model.utils.spmat_op import shrink
+from firing_graph.servers import ArrayServer
+from yala.drainers.shaper import Shaper
+from yala.encoder import MultiEncoders
+from yala.utils.data_models import BitMap, DrainerParameters
+from yala.utils.data_models import FgComponents
+from yala.linalg.spmat_op import shrink
 from tests.units.utils import PerfPlotter
 
 
-class TestDrainer(unittest.TestCase):
+class TestShaper(unittest.TestCase):
     width = 1
     plot_targets = True
     advanced_shaper_plot = False
@@ -30,11 +29,11 @@ class TestDrainer(unittest.TestCase):
         # Build model's element
         self.encoder = MultiEncoders(50, 'quantile', bin_missing=False)
         X_enc, y_enc = self.encoder.fit_transform(X=self.augmented_features, y=self.targets)
-        self.server = YalaUnclassifiedServer(X_enc, y_enc).stream_features()
+        self.server = ArrayServer(X_enc, y_enc).stream_features()
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
 
         if self.plot_targets:
-            self.plot_dataset(self.origin_features, self.targets, 'Circle shapes')
+            self.plot_dataset(self.origin_features, self.targets, 'Square shapes')
 
         # Build test components
         self.got_components = self.build_got_comp()
@@ -46,18 +45,13 @@ class TestDrainer(unittest.TestCase):
         )
         self.drainer_params = DrainerParameters(total_size=20000, batch_size=10000, margin=0.05)
         self.shaper = Shaper(
-            self.server, self.bitmap, self.drainer_params,  min_firing=10, perf_plotter=self.perf_plotter,
+            self.server, self.bitmap, self.drainer_params,  perf_plotter=self.perf_plotter,
             plot_perf_enabled=self.shaper_plot, advanced_plot_perf_enabled=self.advanced_shaper_plot
         )
 
         if self.plot_targets:
             self.shaper.visualize_comp(self.got_components)
             self.shaper.visualize_comp(self.shrink_components)
-
-        print("======= GOT component input ======= ")
-        print(self.bitmap.b2f(self.got_components.inputs).A)
-        print("======= Shrink component input ======= ")
-        print(self.bitmap.b2f(self.shrink_components.inputs).A)
 
     def setup_square_shape(self):
         def is_inside(x):
@@ -75,25 +69,27 @@ class TestDrainer(unittest.TestCase):
     def build_got_comp(self):
         sax_x = self.server.next_forward(n=20000, update_step=False).sax_data_forward
         sax_y = self.server.next_backward(n=20000, update_step=False).sax_data_backward
-        sax_inputs = sax_x.T.dot(sax_y[:, 1]).multiply(csc_matrix(self.bitmap.bf_map[:, [0, 8]].sum(axis=1)))
-        return FgComponents(inputs=(sax_inputs > 0).astype(int), levels=np.array([2]), partitions=[{'id': 'got'}])
-
-    def build_shrink_comp(self):
-        return self.got_components.copy(
-            inputs=shrink(self.got_components.inputs, self.bitmap, n_shrink=5).astype(int),
-            partitions=[{"id": "shrink"}]
+        sax_inputs = sax_x.T.dot(sax_y[:, 1]).multiply(self.bitmap.bf_map[:, 0] + self.bitmap.bf_map[:, 8])
+        return FgComponents(
+            inputs=sax_inputs.tocsr(), mask_inputs=sax_inputs.tocsr(),
+            levels=np.array([2]), partitions=[{'id': 'got'}]
         )
 
-    def test_draining(self):
+    def build_shrink_comp(self):
+        shrink_inputs = shrink(self.got_components.inputs, self.bitmap, n_shrink=5)
+        return self.got_components.copy(inputs=shrink_inputs, mask_inputs=shrink_inputs, partitions=[{"id": "shrink"}])
+
+    def test_shaping(self):
         """
-        python -m unittest tests.units.test_drainer.TestDrainer.test_draining
+        python -m unittest tests.units.test_shaper.TestShaper.test_shaping
 
         """
+        # Shape components
         shaped_components = self.shaper.shape(self.shrink_components)
-        self.shaper.reset()
 
+        # Validate shaping
         got_area = self.got_components.inputs.sum(axis=0).A[0, :] / \
             (self.bitmap.b2f(self.got_components.inputs.astype(bool)).A.sum(axis=1) + 1e-6)
 
-        self.assertTrue(abs(shaped_components.partitions[0]['area'] - got_area[0]) < 2)
+        self.assertTrue(abs(shaped_components.partitions[0]['area'] - got_area[0]) < 2.5)
         self.assertAlmostEqual(shaped_components.partitions[0]['precision'], 1, delta=0.1)

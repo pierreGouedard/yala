@@ -1,7 +1,7 @@
 # Global imports
 import numpy as np
 from itertools import groupby
-from scipy.sparse import eye
+from scipy.sparse import eye, csr_matrix
 
 # Local import
 from firing_graph.graph import FiringGraph
@@ -26,43 +26,64 @@ class YalaFiringGraph(FiringGraph):
         super(YalaFiringGraph, self).__init__(**kwargs)
 
     def to_comp(self):
-        return FgComponents(inputs=self.I.astype(int), levels=self.levels, partitions=self.partitions)
+        return FgComponents(inputs=self.I, mask_inputs=self.Im, levels=self.levels, partitions=self.partitions)
 
     @staticmethod
-    def from_fg_comp(fg_comp: FgComponents):
+    def from_comp(fg_comp: FgComponents):
 
         if len(fg_comp) == 0:
             return None
 
         # Get output indices and initialize matrices
         d_matrices = create_empty_matrices(
-            n_inputs=fg_comp.inputs.shape[0], n_outputs=fg_comp.inputs.shape[1], n_core=fg_comp.inputs.shape[1]
+            fg_comp.inputs.shape[0], fg_comp.inputs.shape[1], fg_comp.inputs.shape[1], write_mode=False
         )
 
         # Set matrices
-        d_matrices['Iw'] = fg_comp.inputs.copy()
-        d_matrices['Ow'] += eye(fg_comp.inputs.shape[1], format='csc', dtype=int)
+        d_matrices['Iw'] = fg_comp.inputs.astype(np.int32)
+        d_matrices['Im'] = fg_comp.mask_inputs
+        d_matrices['O'] += eye(fg_comp.inputs.shape[1], format='csr', dtype=bool)
 
         # Add firing graph kwargs
-        kwargs = {'partitions': fg_comp.partitions, 'matrices': d_matrices, 'ax_levels': fg_comp.levels}
+        kwargs = {
+            'partitions': fg_comp.partitions, 'matrices': d_matrices, 'ax_levels': fg_comp.levels,
+        }
 
         return YalaFiringGraph(**kwargs)
 
-    def get_convex_hull(self, server, n, bitmap, mask=None):
+    @staticmethod
+    def from_inputs(sax_inputs, sax_mask_inputs, levels, partitions):
+
+        # Get output indices and initialize matrices
+        d_matrices = create_empty_matrices(
+            sax_inputs.shape[0], sax_inputs.shape[1], sax_inputs.shape[1], write_mode=False
+        )
+
+        # Set matrices
+        d_matrices['Iw'] = sax_inputs.astype(np.int32)
+        d_matrices['Im'] = sax_mask_inputs
+        d_matrices['O'] += eye(sax_mask_inputs.shape[1], format='csr', dtype=bool)
+
+        # Add firing graph kwargs
+        kwargs = {
+            'partitions': partitions, 'matrices': d_matrices, 'ax_levels': levels,
+        }
+
+        return YalaFiringGraph(**kwargs)
+
+    def get_convex_hull(self, server, n, bitmap):
         # Get masked activations
         sax_x = server.next_forward(n=n, update_step=False).sax_data_forward
 
         # propagate through firing graph
-        sax_fg = self.propagate(sax_x, return_activations=True)
+        sax_fg = self.seq_propagate(sax_x)
 
         # Get masked activations
-        sax_product = (sax_x.T.dot(sax_fg) > 0).astype(int)
-
-        if mask is not None:
-            sax_product = sax_product.multiply(mask)
+        sax_product = sax_x.T.dot(sax_fg)
 
         return FgComponents(
-            inputs=fill_gap(sax_product, bitmap), levels=np.ones(sax_fg.shape[1]), partitions=self.partitions
+            inputs=fill_gap(sax_product, bitmap), mask_inputs=csr_matrix((0, 0)),
+            levels=np.ones(sax_fg.shape[1]), partitions=self.partitions
         )
 
 
@@ -91,7 +112,7 @@ class YalaTopPattern(FiringGraph):
     def build(l_labels, n_inputs, n_outputs):
 
         d_matrices, l_partitions = create_empty_matrices(n_inputs, n_outputs, n_outputs), []
-        d_matrices['Ow'] += eye(n_outputs, format='csc', dtype=int)
+        d_matrices['O'] += eye(n_outputs, format='csc', dtype=int)
 
         # Build I and partitions
         gr = groupby([(l, i) for i, l in enumerate(l_labels)], key=lambda t: t[0])

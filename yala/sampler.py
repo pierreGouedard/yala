@@ -2,7 +2,7 @@
 import numpy as np
 from random import choices
 from string import ascii_uppercase
-from scipy.sparse import csc_matrix
+from scipy.sparse import csr_matrix, lil_matrix
 
 # Local import
 from yala.utils.data_models import ConvexHullProba, FgComponents
@@ -25,18 +25,17 @@ class Sampler:
 
         # Sample features
         ax_indices = np.hstack([np.random.choice(n_features, self.n_bounds, replace=False) for _ in range(n_verts)])
-        ax_mask = np.zeros((n_features, n_verts), dtype=bool)
-        ax_mask[ax_indices, np.array([i // self.n_bounds for i in range(self.n_bounds * n_verts)])] = True
+        sax_mask = lil_matrix((n_features, n_verts), dtype=bool)
+        sax_mask[ax_indices, np.array([i // self.n_bounds for i in range(self.n_bounds * n_verts)])] = True
 
         # Sample inputs and expand it
         sax_sampled = expand(
-            self.server.get_random_samples(n_verts).T.multiply(self.bitmap.f2b(csc_matrix(ax_mask))),
+            self.server.get_random_samples(n_verts).T.multiply(self.bitmap.f2b(sax_mask.tocsr())),
             self.bitmap, n_bits // 2
         )
-
         # Create comp and compute precisions
         comp = FgComponents(
-            inputs=sax_sampled.astype(int), levels=self.bitmap.b2f(sax_sampled).A.sum(axis=1),
+            inputs=sax_sampled, mask_inputs=sax_sampled, levels=self.bitmap.b2f(sax_sampled).A.sum(axis=1),
             partitions=[
                 {'label_id': 0, 'id': ''.join(choices(ascii_uppercase, k=5)), "stage": "ongoing"}
                 for _ in range(sax_sampled.shape[1])
@@ -45,13 +44,13 @@ class Sampler:
 
         return comp
 
-    def sample_bounds(self, base_components, batch_size):
+    def sample_bounds(self, base_components, batch_size, n_bounds):
         # Get convex components
-        ch_components = YalaFiringGraph.from_fg_comp(base_components) \
+        ch_components = YalaFiringGraph.from_comp(base_components) \
             .get_convex_hull(self.server, batch_size, self.bitmap)
 
         # Sample new bounds from CH
-        sax_sampled = csc_matrix(self.sample_from_proba(base_components).T)
+        sax_sampled = csr_matrix(self.sample_from_proba(base_components, n_bounds).T, dtype=bool)
         ch_components.update(inputs=ch_components.inputs.multiply(self.bitmap.f2b(sax_sampled)))
 
         # Update base component's bounds
@@ -65,12 +64,13 @@ class Sampler:
 
         return base_components
 
-    def sample_from_proba(self, comps):
+    def sample_from_proba(self, comps, n_bounds=None):
         ax_p = self.ch_probas.get_probas(comps, self.bitmap)
+        n_bounds = n_bounds or self.n_bounds
 
         # Prepare choice
         (ny, nx), ax_linear = ax_p.shape, np.arange(ax_p.shape[1])
-        ax_counts = np.minimum((ax_p > 0).sum(axis=1), self.n_bounds) * ((ax_p > 0).sum(axis=1) >= self.n_bounds)
+        ax_counts = np.minimum((ax_p > 0).sum(axis=1), n_bounds) * ((ax_p > 0).sum(axis=1) >= n_bounds)
 
         def masked_choice(ax_p_, n_):
             return list(np.random.choice(ax_linear, n_, replace=False, p=ax_p_))

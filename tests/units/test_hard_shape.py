@@ -5,16 +5,15 @@ import numpy as np
 import unittest
 
 # Local import
-from src.model.yala import Yala
+from yala.yala import Yala
 from tests.units.utils import PerfPlotter
 
 
 class TestHardShape(unittest.TestCase):
     show_dataset = True
     p_yala = {
-        'draining_margin': 0.05, 'n_parallel': 2, 'init_level': 3, 'n_update': 2, 'draining_size': 10000,
-        'batch_size': 5000, 'min_firing': 100, 'dropout_rate_mask': 0.99, 'n_run': 100, 'n_bin': 50,
-        'bin_method': 'quantile', 'bin_missing': False
+        'draining_margin': 0.05, 'n_parallel': 1, 'n_update': 2, 'draining_size': 40000,
+        'batch_size': 20000, 'n_run': 100, 'n_bin': 50, 'bin_method': 'quantile', 'bin_missing': False
     }
     n_shape = 1
     type_basis = 'circle'
@@ -24,7 +23,7 @@ class TestHardShape(unittest.TestCase):
         np.random.seed(1234)
 
         # Create datasets
-        self.origin_features = np.random.randn(20000, 2)
+        self.origin_features = np.random.uniform(low=[-2.5, -2.5], high=[2.5, 2.5], size=(40000, 2))
         self.setup_circle_shape()
         self.setup_square_shape()
 

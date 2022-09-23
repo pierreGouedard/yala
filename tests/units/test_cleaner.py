@@ -1,15 +1,15 @@
 # Global import
-from scipy.sparse import csc_matrix
+from scipy.sparse import csr_matrix
 import numpy as np
 import unittest
 
 # Local import
-from src.model.core.server import YalaUnclassifiedServer
-from src.model.utils.firing_graph import YalaFiringGraph
-from src.model.core.encoder import MultiEncoders
-from src.model.utils.data_models import BitMap
-from src.model.core.cleaner import Cleaner
-from src.model.core.sampler import Sampler
+from firing_graph.servers import ArrayServer
+from yala.firing_graph import YalaFiringGraph
+from yala.encoder import MultiEncoders
+from yala.utils.data_models import BitMap
+from yala.cleaner import Cleaner
+from yala.sampler import Sampler
 from tests.units.utils import PerfPlotter
 
 
@@ -30,14 +30,14 @@ class TestCleaner(unittest.TestCase):
         # Build model's element
         self.encoder = MultiEncoders(50, 'quantile', bin_missing=False)
         X_enc, y_enc = self.encoder.fit_transform(X=self.augmented_features, y=self.targets)
-        self.server = YalaUnclassifiedServer(X_enc, y_enc).stream_features()
+        self.server = ArrayServer(X_enc, y_enc).stream_features()
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
         self.cleaner = Cleaner(self.server, self.bitmap, 3000, perf_plotter=self.perf_plotter, plot_perf_enable=True)
         self.sampler = Sampler(self.server, self.bitmap)
 
         # Build test components
         self.test_component = self.sampler.init_sample(1, n_bits=10)
-        self.test_component_ch = YalaFiringGraph.from_fg_comp(self.test_component)\
+        self.test_component_ch = YalaFiringGraph.from_comp(self.test_component)\
             .get_convex_hull(self.server, 3000, self.bitmap)
 
         print("======= Test component input ======= ")
@@ -48,7 +48,7 @@ class TestCleaner(unittest.TestCase):
     def sample(self, n):
         # Select 1 additional bound to clean
         ind_mask = list(np.random.choice(np.arange(self.bitmap.nf), size=n, replace=False))
-        sax_inputs = csc_matrix(self.bitmap.bf_map[:, ind_mask].sum(axis=1)).multiply(self.test_component_ch.inputs)
+        sax_inputs = csr_matrix(self.bitmap.bf_map[:, ind_mask].sum(axis=1) > 0).multiply(self.test_component_ch.inputs)
         return sax_inputs + self.test_component.inputs[:, 0]
 
     def test_one_to_clean(self):
@@ -103,6 +103,12 @@ class TestCleaner(unittest.TestCase):
         print(self.bitmap.b2f(sax_inputs).A)
 
         # Clean component
+        level = self.bitmap.b2f(sax_inputs.astype(bool)).sum()
         clean_component = self.cleaner.clean_component(
-            self.test_component_ch.copy(inputs=sax_inputs, levels=np.ones(1) * 4)
+            self.test_component_ch.copy(inputs=sax_inputs, levels=np.ones(1) * level)
         )
+        self.assertTrue(
+            (self.bitmap.b2f(self.test_component.inputs > 0).A == self.bitmap.b2f(clean_component.inputs > 0).A).all()
+        )
+        self.assertTrue((clean_component.levels == self.test_component.levels).all())
+

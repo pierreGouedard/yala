@@ -3,10 +3,10 @@ import numpy as np
 import unittest
 
 # Local import
-from src.model.core.server import YalaUnclassifiedServer
-from src.model.core.encoder import MultiEncoders
-from src.model.utils.data_models import BitMap
-from src.model.core.sampler import Sampler
+from firing_graph.servers import ArrayServer
+from yala.encoder import MultiEncoders
+from yala.utils.data_models import BitMap
+from yala.sampler import Sampler
 from tests.units.utils import PerfPlotter
 
 
@@ -28,7 +28,7 @@ class TestSampler(unittest.TestCase):
         # Build model's element
         self.encoder = MultiEncoders(50, 'quantile', bin_missing=False)
         X_enc, y_enc = self.encoder.fit_transform(X=self.augmented_features, y=self.targets)
-        self.server = YalaUnclassifiedServer(X_enc, y_enc).stream_features()
+        self.server = ArrayServer(X_enc, y_enc).stream_features()
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
         self.sampler = Sampler(self.server, self.bitmap, n_bounds=self.n_bounds)
 
@@ -42,9 +42,9 @@ class TestSampler(unittest.TestCase):
         # Assert that number of bound is correct
         self.assertTrue((self.bitmap.b2f(comp_sampled.inputs.astype(bool)).A.sum(axis=1) == self.n_bounds).all())
 
-        # Assert for each vertices / boundsthere is at least 6 bit, at most 11 bit that are non null
+        # Assert for each vertices / bounds there is at least 6 bit, at most 11 bit that are non null
         for i, comp in enumerate(comp_sampled):
-            ax_cnt_features = self.bitmap.b2f(comp.inputs).A[0, :]
+            ax_cnt_features = self.bitmap.b2f(comp.inputs.astype(np.int32)).A[0, :]
             self.assertTrue((ax_cnt_features[ax_cnt_features > 0] >= 6).all())
             self.assertTrue((ax_cnt_features[ax_cnt_features > 0] <= 11).all())
 

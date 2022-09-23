@@ -1,6 +1,6 @@
 # Local import
 import numpy as np
-from scipy.sparse import csc_matrix, hstack
+from scipy.sparse import csr_matrix, hstack
 
 # Global import
 
@@ -66,7 +66,7 @@ class Encoder(object):
         if self.bin_missing:
             ax_activation = np.hstack([ax_activation, ~ax_activation.any(axis=1, keepdims=True)])
 
-        return csc_matrix(ax_activation)
+        return csr_matrix(ax_activation)
 
 
 class MultiEncoders():
@@ -100,7 +100,7 @@ class MultiEncoders():
             ax_bf_map[range(n_inputs, n_inputs + self.encoders[i].total_size), i] = True
             n_inputs += self.encoders[i].total_size
 
-        self.bf_map = csc_matrix(ax_bf_map[:n_inputs, :])
+        self.bf_map = csr_matrix(ax_bf_map[:n_inputs, :])
         self.n_label = len(np.unique(y))
 
         return self
@@ -110,10 +110,10 @@ class MultiEncoders():
 
         # Transform target
         if self.n_label > 1:
-            y = csc_matrix(([True] * y.shape[0], (range(y.shape[0]), y)), shape=(y.shape[0], self.n_label))
+            y = csr_matrix(([True] * y.shape[0], (range(y.shape[0]), y)), shape=(y.shape[0], self.n_label))
 
         else:
-            y = csc_matrix(y[:, np.newaxis] > 0)
+            y = csr_matrix(y[:, np.newaxis] > 0)
         # Transform features
         if self.basis is not None:
             pass

@@ -1,38 +1,82 @@
 # Global import
 import numpy as np
+from dataclasses import dataclass
+from scipy.sparse import hstack as sphstack
 
 # Local import
-from yala.utils.data_models import DrainerFeedbacks
+from yala.utils.data_models import FgComponents
 
 
-def init_parameters(drainer_params, min_feedback=5):
+@dataclass
+class MaskManager:
+    counter: np.array
+    sizes: np.array
+    changes: np.array
+    mask: np.ndarray
 
-    # Get params
-    ax_precision, margin = drainer_params.precisions, drainer_params.margin
-    ax_precision = ax_precision.clip(max=1., min=margin + 0.01)
+    def __init__(self, comps, bitmap):
+        self.mask = np.stack([bitmap.bf_map[:, bitmap.b2f(comp.inputs).A[0, :]] for comp in comps])
+        self.sizes, self.counter = comps.levels.copy(), comps.levels.copy()
+        self.changes = np.zeros(len(self), dtype=bool)
 
-    # Compute penalty and reward values
-    ax_p, ax_r = set_feedbacks(ax_precision - margin, ax_precision - (margin / 2))
-    drainer_params.feedbacks = DrainerFeedbacks(penalties=ax_p, rewards=ax_r)
+    def __len__(self):
+        return self.counter.shape[0]
 
-    # Compute weights
-    drainer_params.weights = ((ax_p - ((ax_precision - margin) * (ax_p + ax_r))) * min_feedback).astype(int) + 1
+    def get_curr_bmask(self, sax_inputs):
+        sax_curr_mask = sphstack([self.mask[i][:, c - 1] for i, c in enumerate(self.counter)])
+        return sax_inputs.multiply(sax_curr_mask)
 
-    return drainer_params
+    def get_oth_bmask(self, sax_inputs):
+        sax_oth_mask = sphstack([
+            sum([self.mask[i][:, j] for j in range(self.sizes[i]) if j != c - 1]) for i, c in enumerate(self.counter)
+        ])
 
+        return sax_inputs.multiply(sax_oth_mask)
 
-def set_feedbacks(ax_phi_old, ax_phi_new, r_max=1000):
-    ax_p, ax_r = np.zeros(ax_phi_new.shape), np.zeros(ax_phi_new.shape)
-    for i, (phi_old, phi_new) in enumerate(zip(*[ax_phi_old, ax_phi_new])):
-        p, r = set_feedback(phi_old, phi_new, r_max)
-        ax_p[i], ax_r[i] = p, r
+    def update_counter(self, sax_old_inputs, sax_new_inputs):
+        # Build mask of unchanged inputs
+        ax_mask = sax_old_inputs.sum(axis=0).A[0] != self.get_curr_bmask(sax_new_inputs).sum(axis=0).A[0]
 
-    return ax_p, ax_r
+        # Track changes and decrement counter with no changes
+        self.changes += ax_mask
+        self.counter[~ax_mask] = self.counter[~ax_mask] - 1
 
+        return self
 
-def set_feedback(phi_old, phi_new, r_max=1000):
-    for r in range(r_max):
-        p = np.ceil(r * phi_old / (1 - phi_old))
-        score = (phi_new * (p + r)) - p
-        if score > 0.:
-            return p, r
+    def reset(self, i=None):
+        if i is not None:
+            self.counter[i] = self.sizes[i]
+            self.changes[i] = False
+        else:
+            self.counter = self.sizes.copy()
+            self.changes = np.zeros(len(self))
+
+    def pop_no_changes(self, comps):
+
+        i, stop, conv_comps = 0, False, FgComponents.empty_comp()
+        while not stop:
+            if self.counter[i] == 0:
+                if self.changes[i]:
+                    self.reset(i)
+                    i += 1
+
+                else:
+                    conv_comps += comps.pop(i)
+                    self._pop(i)
+                    print(f'{i} pop')
+            else:
+                i += 1
+
+            # Increment i
+            stop = i >= len(comps)
+
+        return conv_comps, comps
+
+    def _pop(self, i):
+        # Imitate pop of FG component
+        self.counter = np.array([c for j, c in enumerate(self.counter) if j != i])
+        self.sizes = np.array([s for j, s in enumerate(self.sizes) if j != i])
+        self.changes = np.array([c for j, c in enumerate(self.changes) if j != i])
+        l_masks, self.mask = [ax_mask for j, ax_mask in enumerate(self.mask) if j != i], np.array([])
+        if l_masks:
+            self.mask = np.stack(l_masks)

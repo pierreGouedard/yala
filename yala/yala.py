@@ -8,7 +8,7 @@ from .drainers.shaper import Shaper
 from .cleaner import Cleaner
 from .tracker import Tracker
 from .sampler import Sampler
-
+from .utils.visual import Visualizer
 
 class Yala(object):
 
@@ -40,7 +40,9 @@ class Yala(object):
         self.drainer_params = DrainerParameters(total_size=draining_size, batch_size=batch_size, margin=draining_margin)
 
         # Tracker params
-        self.tracker_params = TrackerParameters(min_delta_area=min_delta_area, max_no_changes=max_no_changes)
+        self.tracker_params = TrackerParameters(
+            min_delta_area=min_delta_area, max_no_changes=max_no_changes, min_area=5
+        )
 
         # Yala Core attributes
         self.firing_graph, self.bitmap = None, None
@@ -58,10 +60,9 @@ class Yala(object):
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
         self.server = ArrayServer(X_enc, y_enc).stream_features()
 
-        shaper = Shaper(
-            self.server, self.bitmap, self.drainer_params, perf_plotter=kwargs.get('perf_plotter', None),
-            plot_perf_enabled=True, advanced_plot_perf_enabled=False
-        )
+        # Gte core components
+        visualizer = Visualizer(kwargs.get('perf_plotter', None), self.bitmap)
+        shaper = Shaper(self.server, self.bitmap, self.drainer_params, True, visualizer)
         cleaner = Cleaner(self.server, self.bitmap, self.drainer_params.batch_size)
         sampler = Sampler(self.server, self.bitmap)
 
@@ -72,30 +73,26 @@ class Yala(object):
             base_components = sampler.init_sample(self.n_parallel, n_bits=7)
 
             # Instantiate tracking
-            tracker = Tracker(
-                [d['id'] for d in base_components.partitions], tracker_params=self.tracker_params,
-                n_features=self.encoder.bf_map.shape[1]
-            )
+            tracker = Tracker(self.tracker_params, self.server).update_metrics(base_components, update_tracking=True)
 
             # Core loop
             i = 0
             while len(base_components) > 0 and i < self.max_iter:
                 # Shape components
                 base_components = shaper.shape(base_components)
-                shaper.reset()
 
                 # Clean base components
                 base_components = cleaner.clean_component(base_components)
 
                 # Check for component that has converged
-                base_components = tracker.swap_components(base_components)
+                base_components = tracker.refresh_tracking(base_components)
 
                 # exit loop if all comp have merged
                 if base_components.empty:
                     break
 
                 # Resample new bounds for base components that have not converged yet
-                sampler.sample_bounds(base_components, self.drainer_params.batch_size)
+                sampler.sample_bounds(base_components, self.drainer_params.batch_size, 1)
 
                 # Visualize training
                 i += 1
@@ -103,7 +100,7 @@ class Yala(object):
                     tracker.visualize_indicators()
 
             tracker.visualize_indicators()
-            complete_components = tracker.components
-            shaper.visualize_comp(complete_components)
+            complete_components = tracker.conv_comps
+            self.visualizer.visualize_comp(complete_components)
 
         return self

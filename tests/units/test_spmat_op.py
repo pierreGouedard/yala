@@ -1,15 +1,14 @@
 # Global import
-from scipy.sparse import csc_matrix, lil_matrix
+from scipy.sparse import lil_matrix, csr_matrix
 import numpy as np
 import unittest
 
 # Local import
-from src.model.core.server import YalaUnclassifiedServer
-from src.model.core.sampler import Sampler
-from src.model.core.encoder import MultiEncoders
-from src.model.utils.data_models import BitMap
-from src.model.utils.data_models import FgComponents
-from src.model.utils.spmat_op import shrink, expand, bounds, add_connex
+from firing_graph.servers import ArrayServer
+from yala.sampler import Sampler
+from yala.encoder import MultiEncoders
+from yala.utils.data_models import BitMap, FgComponents
+from yala.linalg.spmat_op import shrink, expand, bounds, add_connex
 
 
 class TestSpmatOp(unittest.TestCase):
@@ -24,7 +23,7 @@ class TestSpmatOp(unittest.TestCase):
         # Build model's element
         self.encoder = MultiEncoders(50, 'quantile', bin_missing=False)
         X_enc, y_enc = self.encoder.fit_transform(X=self.augmented_features, y=np.random.binomial(1, 0.5, 20000))
-        self.server = YalaUnclassifiedServer(X_enc, y_enc).stream_features()
+        self.server = ArrayServer(X_enc, y_enc).stream_features()
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
         self.sampler = Sampler(self.server, self.bitmap)
 
@@ -41,11 +40,13 @@ class TestSpmatOp(unittest.TestCase):
         return self.sampler.init_sample(2, n_bits=self.n_vertices)
 
     def build_conn_comp(self):
-        sax_inputs = csc_matrix((self.bitmap.nb, self.n_vertices))
-        sax_inputs[[125, 126, 127, 215, 216, 217], [0, 0, 0, 0, 0, 0]] = 1
-        sax_inputs[[524, 525, 526, 527, 615, 616, 617], [1, 1, 1, 1, 1, 1, 1]] = 1
+        sax_inputs = lil_matrix((self.bitmap.nb, self.n_vertices), dtype=bool)
+        sax_inputs[[125, 126, 127, 215, 216, 217], [0, 0, 0, 0, 0, 0]] = True
+        sax_inputs[[524, 525, 526, 527, 615, 616, 617], [1, 1, 1, 1, 1, 1, 1]] = True
 
-        return FgComponents(inputs=sax_inputs, levels=np.array([2, 2]), partitions=[{}, {}])
+        return FgComponents(
+            inputs=sax_inputs.tocsr(), mask_inputs=sax_inputs.tocsr(), levels=np.array([2, 2]), partitions=[{}, {}]
+        )
 
     def test_expand(self):
         """
@@ -78,6 +79,7 @@ class TestSpmatOp(unittest.TestCase):
         # Test that features shouldn't have changed
         ax_shrinked_inputs = self.bitmap.b2f(sax_shrinked_inputs > 0).A.astype(bool)
         ax_test_features = self.bitmap.b2f(self.test_components.inputs > 0).A.astype(bool)
+
         self.assertTrue((ax_shrinked_inputs == ax_test_features).all())
 
         # Test that correct number of bit has been added
@@ -86,7 +88,7 @@ class TestSpmatOp(unittest.TestCase):
                 n_shrinked = sax_shrinked_inputs[:, j].multiply(sax_mask).nnz
                 n_test = self.test_components.inputs[:, j].multiply(sax_mask).nnz
                 if n_test > 0:
-                    self.assertTrue(n_shrinked == n_test - 4)
+                    self.assertTrue(n_shrinked == n_test - 2)
 
     def test_bounds(self):
         """
@@ -115,7 +117,7 @@ class TestSpmatOp(unittest.TestCase):
         l_bounds = [(ax_rnz[ax_cnz == i].min(), ax_rnz[ax_cnz == i].max()) for i in range(self.n_vertices)]
 
         # First test with nothing to add
-        sax_inputs = csc_matrix(self.test_conn_components.inputs.shape)
+        sax_inputs = csr_matrix(self.test_conn_components.inputs.shape)
         sax_result = add_connex(self.test_conn_components.inputs.copy(), sax_inputs, self.bitmap)
         self.assertTrue(all([
             self.test_conn_components.inputs[:, i].nnz == sax_result[:, i].nnz for i in range(self.n_vertices)
@@ -127,7 +129,7 @@ class TestSpmatOp(unittest.TestCase):
             sax_inputs[[l_bounds[i][0] - 2, l_bounds[i][0] - 3, l_bounds[i][0] - 4], i] = 1
             sax_inputs[[l_bounds[i][1] + 2, l_bounds[i][1] + 3, l_bounds[i][1] + 4], i] = 1
 
-        sax_result = add_connex(self.test_conn_components.inputs.copy(), sax_inputs.tocsc(), self.bitmap)
+        sax_result = add_connex(self.test_conn_components.inputs.copy(), sax_inputs.tocsr(), self.bitmap)
 
         self.assertTrue(all([
             self.test_conn_components.inputs[:, i].nnz == sax_result[:, i].nnz for i in range(self.n_vertices)
@@ -139,7 +141,7 @@ class TestSpmatOp(unittest.TestCase):
             sax_inputs[[l_bounds[i][0] - 1, l_bounds[i][0] - 2, l_bounds[i][0] - 4], i] = 1
             sax_inputs[[l_bounds[i][1] + 1, l_bounds[i][1] + 2, l_bounds[i][1] + 4], i] = 1
 
-        sax_result = add_connex(self.test_conn_components.inputs.copy(), sax_inputs.tocsc(), self.bitmap)
+        sax_result = add_connex(self.test_conn_components.inputs.copy(), sax_inputs.tocsr(), self.bitmap)
         self.assertTrue(all([
             self.test_conn_components.inputs[:, i].nnz + 4 == sax_result[:, i].nnz for i in range(self.n_vertices)
         ]))

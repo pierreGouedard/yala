@@ -1,71 +1,102 @@
 # Global import
 from matplotlib import pyplot as plt
-import numpy as np
+from numpy import arange, array, int32
 from copy import deepcopy as copy
 
 # Local import
 from yala.utils.data_models import FgComponents
+from yala.firing_graph import YalaFiringGraph
 
 
 class Tracker:
-    tracking_infos = ['area', 'n_no_changes']
-    swap = {"compress": "expand", 'expand': 'compress'}
 
-    def __init__(self, l_ids, tracker_params, n_features, min_area=1):
-        # Completion criterion
-        self.n_features = n_features
-        self.min_area = min_area
+    def __init__(self, tracker_params, server):
+        self.server = server
         self.tracker_params = tracker_params
-        self.components = FgComponents.empty_comp()
+        self.conv_comps = FgComponents.empty_comp()
 
-        # Attributes init
-        self.indicator = {nid: [] for nid in l_ids}
+        # Tracking
+        self.tracking = {}
 
-    def update_tracker(self, nid, d_new):
-        self.indicator[nid].append(d_new)
+    def update_metrics(self, comps, update_tracking=False):
+        # Get input
+        sax_x = self.server.next_all_forward().sax_data_forward
+        sax_y = self.server.next_all_backward().sax_data_backward
+
+        # propagate through firing graph
+        sax_fg = YalaFiringGraph.from_comp(comps).seq_propagate(sax_x)
+
+        # Compute precision
+        ax_areas = sax_fg.sum(axis=0).A[0]
+        ax_precs = (sax_y.T.astype(int32).dot(sax_fg) / (sax_fg.sum(axis=0) + 1e-6)).A
+        ax_precs, ax_labels = ax_precs.max(axis=0), ax_precs.argmax(axis=0)
+
+        comps.partitions = [
+            {**d, 'precision': ax_precs[i], 'label_id': ax_labels[i], 'area': ax_areas[i]}
+            for i, d in enumerate(comps.partitions)
+        ]
+
+        if update_tracking:
+            [self.update_tracking(part['id'], part) for part in comps.partitions]
+
         return self
 
-    def swap_components(self, components):
-        for i, sub_comp in enumerate(components):
-            d_new = sub_comp.partitions[0]
-            d_prev = {} if not self.indicator[d_new['id']] else copy(self.indicator[d_new['id']][-1])
+    def update_tracking(self, cid, d_new_metrics):
+        if not self.tracking.get(cid, {}):
+            self.tracking[cid] = {'historic': []}
 
-            if d_new['area'] < self.min_area:
-                components.partitions[i]['stage'] = 'done'
+        self.tracking[cid]['area'] = d_new_metrics['area']
+        self.tracking[cid]['precision'] = d_new_metrics['precision']
+        self.tracking[cid]['historic'].append((d_new_metrics['area'], d_new_metrics['precision']))
+
+        return self
+
+    def refresh_tracking(self, comps):
+
+        # Update metrics of comps
+        self.update_metrics(comps)
+
+        # Set stage of comps
+        for i, comp in enumerate(comps):
+            cid, d_new_metrics = comp.partitions[0]['id'], comp.partitions[0]
+
+            if d_new_metrics['area'] < self.tracker_params.min_area or comp.levels[0] == 1:
+                comps.partitions[i]['stage'] = 'done'
+                self.update_tracking(cid, d_new_metrics)
                 continue
 
             # Test whether the min precision and size gain is reached
-            delta_area = abs(d_new['area'] - d_prev.get('area', 0)) / d_prev.get('area', 1e-6)
+            delta_area = abs(d_new_metrics['area'] - self.tracking[cid]['area']) / self.tracking[cid]['area']
             if delta_area < self.tracker_params.min_delta_area:
-                d_new['n_no_changes'] = d_prev.get('n_no_changes', 0) + 1
-                if d_prev.get('n_no_changes', 0) + 1 > self.tracker_params.max_no_changes:
-                    components.partitions[i]['stage'] = 'done'
+                self.tracking[cid]['n_no_changes'] = self.tracking[cid].get('n_no_changes', 0) + 1
+
+                if self.tracking[cid]['n_no_changes'] > self.tracker_params.max_no_changes:
+                    comps.partitions[i]['stage'] = 'done'
             else:
-                d_new['n_no_changes'] = 0
+                self.tracking[cid]['n_no_changes'] = 0
 
-            self.update_tracker(d_new["id"], {k: d_new.get(k, d_prev.get(k, 0)) for k in self.tracking_infos})
+            self.update_tracking(cid, d_new_metrics)
 
-        # Pop 'done' components
+        # Pop 'done' comps
+        return self.pop_conv_comp(comps)
+
+    def pop_conv_comp(self, comps):
         i, stop = 0, False
         while not stop:
-            comp = components[i]
+            if comps[i].partitions[0]['stage'] == 'done':
+                self.conv_comps += comps.pop(i)
+            else:
+                i += 1
 
-            if comp.partitions[0]['stage'] == 'done':
-                components.pop(i)
-                stop = i >= len(components)
-                self.components += comp
-                continue
+            stop = i >= len(comps)
 
-            i += 1
-            stop = i >= len(components)
-
-        return components
+        return comps
 
     def visualize_indicators(self):
         # Plot for each node
-        for k, v in self.indicator.items():
-            ax_x = np.arange(len(v))
-            ax_areas = np.array([d["area"] for d in v])
+        for k, v in self.tracking.items():
+            ax_x = arange(len(v['historic']))
+            ax_areas = array([t[0] for t in v['historic']])
             plt.plot(ax_x, ax_areas, label=f"vertex {k}")
 
         plt.legend()

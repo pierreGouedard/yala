@@ -2,7 +2,7 @@
 # Global import
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from scipy.sparse import spmatrix, csc_matrix, hstack as sphstack
+from scipy.sparse import spmatrix, csr_matrix, hstack as sphstack
 from copy import deepcopy as copy
 from functools import lru_cache
 import numpy as np
@@ -49,20 +49,18 @@ class BitMap:
     def bitmask(self, sax_x):
         return self.f2b(self.b2f(sax_x).T)
 
-    def explode(self, sax_x, ind=0):
-        return sax_x[:, [ind] * self.nf].multiply(self.bf_map)
-
 
 @dataclass
 class FgComponents:
     inputs: spmatrix
+    mask_inputs: spmatrix
     partitions: List[Dict[str, Any]]
     levels: np.array
     __idx: int = 0
 
     @staticmethod
     def empty_comp():
-        return FgComponents(csc_matrix((0, 0)), [], np.empty((0,)))
+        return FgComponents(csr_matrix((0, 0)), csr_matrix((0, 0)), [], np.empty((0,)))
 
     @property
     def empty(self):
@@ -87,17 +85,20 @@ class FgComponents:
     def __getitem__(self, i):
         assert isinstance(i, int), 'index should be an integer'
         return FgComponents(
-            inputs=self.inputs[:, i], partitions=[self.partitions[i]], levels=self.levels[[i]]
+            inputs=self.inputs[:, i], mask_inputs= self.mask_inputs[:, i],
+            partitions=[self.partitions[i]], levels=self.levels[[i]]
         )
 
     def __add__(self, other):
         if self.inputs.shape[1] == 0:
             sax_inputs = other.inputs
+            sax_mask_input = other.mask_inputs
         else:
-            sax_inputs = sphstack([self.inputs, other.inputs])
+            sax_inputs = sphstack([self.inputs, other.inputs], format='csr')
+            sax_mask_input = sphstack([self.mask_inputs, other.mask_inputs], format='csr')
 
         return FgComponents(
-            inputs=sax_inputs, partitions=self.partitions + other.partitions,
+            inputs=sax_inputs, mask_inputs=sax_mask_input, partitions=self.partitions + other.partitions,
             levels=np.hstack([self.levels, other.levels])
         )
 
@@ -111,10 +112,14 @@ class FgComponents:
         if kwargs.get('inputs', None) is not None:
             self.inputs = kwargs['inputs']
 
+        if kwargs.get('mask_inputs', None) is not None:
+            self.mask_inputs = kwargs['mask_inputs']
+
         return self
 
+    # TODO: the 2 below are may be not supposed to be here.
     def complement(self, sax_mask=None, inplace=False, **kwargs):
-        sax_inputs = csc_matrix((self.inputs > 0).A ^ np.ones(self.inputs.shape, dtype=bool))
+        sax_inputs = csr_matrix((self.inputs > 0).A ^ np.ones(self.inputs.shape, dtype=bool))
         if sax_mask is not None:
             sax_inputs = sax_inputs.multiply(sax_mask)
 
@@ -123,29 +128,21 @@ class FgComponents:
         else:
             return self.copy(inputs=sax_inputs, **kwargs)
 
-    def explode(self, bitmap: BitMap, inplace=False, **kwargs):
-        sax_inputs = sphstack([bitmap.explode(self.inputs, i) for i in range(self.inputs.shape[1])])
-        partitions = [{'contract_id': f'{i}', **p} for i, p in enumerate(self.partitions) for _ in range(bitmap.nf)]
-        levels = np.ones(len(partitions))
-
-        if inplace:
-            self.update(inputs=sax_inputs, partitions=partitions, levels=levels, **kwargs)
-        else:
-            return self.copy(inputs=sax_inputs, partitions=partitions, levels=levels, **kwargs)
-
     def pop(self, ind):
         tmp = self[ind]
         l_idx = list(set(range(len(self))).difference({ind}))
 
         # Update data
         self.partitions = [self.partitions[i] for i in l_idx]
-        self.inputs, self.levels = self.inputs[:, l_idx], self.levels[l_idx]
+        self.inputs, self.mask_inputs = self.inputs[:, l_idx].tocsr(), self.mask_inputs[:, l_idx].tocsr()
+        self.levels = self.levels[l_idx]
 
         return tmp
 
     def copy(self, **kwargs):
         return FgComponents(**{
-            'inputs': self.inputs.copy(), 'partitions': copy(self.partitions), 'levels': self.levels.copy(), **kwargs
+            'inputs': self.inputs.copy(), 'mask_inputs': self.mask_inputs.copy(), 'partitions': copy(self.partitions),
+            'levels': self.levels.copy(), **kwargs
         })
 
 
@@ -154,7 +151,7 @@ class ConvexHullProba:
     counts: Optional[Dict[str, np.array]] = None
 
     def get_probas(self, comp: FgComponents, bitmap: BitMap):
-        ax_support_bounds = bitmap.b2f(comp.inputs.astype(bool)).A
+        ax_support_bounds = bitmap.b2f(comp.inputs).A
 
         if self.counts is None:
             ax_counts = np.ones(ax_support_bounds.shape)
@@ -169,21 +166,12 @@ class ConvexHullProba:
         if self.counts is None:
             self.counts = {}
 
-        ax_counts = bitmap.b2f(comp.inputs.astype(bool)).A
+        ax_counts = bitmap.b2f(comp.inputs).A
         self.counts = {
-            d['id']: self.counts.get(d['id'], np.ones(bitmap.nf)) + ax_counts[i]
+            d['id']: self.counts.get(d['id'], np.ones(bitmap.nf)) + ax_counts[i].astype(int)
             for i, d in enumerate(comp.partitions)
         }
         return self
-
-
-@dataclass
-class DrainerFeedbacks:
-    penalties: np.array
-    rewards: np.array
-
-    def get_all(self):
-        return self.penalties, self.rewards
 
 
 @dataclass
@@ -191,7 +179,6 @@ class DrainerParameters:
     total_size: int
     batch_size: int
     margin: float
-    feedbacks: Optional[DrainerFeedbacks] = None
     weights: Optional[np.array] = None
     precisions: Optional[np.array] = None
 
@@ -202,5 +189,7 @@ class DrainerParameters:
 @dataclass
 class TrackerParameters:
     min_delta_area: float
+    min_area: float
     max_no_changes: int
+
 
