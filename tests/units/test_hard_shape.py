@@ -12,26 +12,27 @@ from tests.units.utils import PerfPlotter
 class TestHardShape(unittest.TestCase):
     show_dataset = True
     p_yala = {
-        'draining_margin': 0.05, 'n_parallel': 1, 'n_update': 2, 'draining_size': 40000,
-        'batch_size': 20000, 'n_run': 100, 'n_bin': 50, 'bin_method': 'quantile', 'bin_missing': False
+        'draining_margin': 0.05, 'n_parallel': 1, 'n_bounds_start': 2, 'batch_size': 50000, 'n_run': 100, 'n_bin': 100,
+        'bin_method': 'quantile', 'bin_missing': False
     }
     n_shape = 1
     type_basis = 'circle'
     shape = 'circle'
 
     def setUp(self):
-        np.random.seed(1234)
+        np.random.seed(12345)
 
         # Create datasets
-        self.origin_features = np.random.uniform(low=[-2.5, -2.5], high=[2.5, 2.5], size=(40000, 2))
+        self.origin_features = np.random.uniform(low=[-2.5, -2.5], high=[2.5, 2.5], size=(50000, 2))
         self.setup_circle_shape()
         self.setup_square_shape()
+        self.setup_triangle_shape()
 
         # augment dataset
         if self.type_basis == 'random':
             self.basis = np.random.randn(2, 20)
         elif self.type_basis == 'circle':
-            self.basis = np.vstack([np.cos(np.arange(0, np.pi, 0.2)), np.sin(np.arange(0, np.pi, 0.2))])
+            self.basis = np.vstack([np.cos(np.arange(0, np.pi, np.pi / 20)), np.sin(np.arange(0, np.pi, np.pi / 20))])
 
         self.augmented_features = self.origin_features.dot(self.basis) * 100
 
@@ -39,6 +40,7 @@ class TestHardShape(unittest.TestCase):
         if self.show_dataset:
             self.plot_dataset(self.origin_features, self.ctargets, 'Circle shapes')
             self.plot_dataset(self.origin_features, self.stargets, 'Square shapes')
+            self.plot_dataset(self.origin_features, self.ttargets, 'Truangle shapes')
 
     def setup_circle_shape(self):
         # Create datasets
@@ -48,13 +50,26 @@ class TestHardShape(unittest.TestCase):
         self.ctargets = np.array([max([m.pdf(x) for m in l_norm]) > 0.10 for x in self.origin_features])
 
     def setup_square_shape(self):
-        l_centers = [(np.random.randn(2), abs(np.random.randn())) for _ in range(self.n_shape)]
+        l_centers = [(np.random.randn(2) * 0.5, 1.) for _ in range(self.n_shape)]
 
         def is_inside(x):
             return any([all([abs(x[i] - c[0][i]) < (c[1] / 2) for i in range(2)]) for c in l_centers])
 
         # Compute labels
-        self.stargets = np.array([is_inside(x) for x in self.origin_features])
+        test = np.array([[np.cos(np.pi / 10), np.cos(6 * np.pi / 10)], [np.sin(np.pi / 10), np.sin(6 * np.pi / 10)]])
+        self.stargets = np.array([is_inside(x) for x in self.origin_features.dot(test)])
+
+    def setup_triangle_shape(self):
+        center = (np.random.randn(2) * 0.5, 1.)
+        ax_line = np.array([-1, -1])
+
+        def is_inside(x):
+            in_square = all([x[i] - center[0][i] > 0 for i in range(2)])
+            return all([x[i] - center[0][i] > 0 for i in range(2)]) and x.dot(ax_line) + 1 > 0
+
+        # Compute labels
+        test = np.array([[np.cos(np.pi / 10), np.cos(6 * np.pi / 10)], [np.sin(np.pi / 10), np.sin(6 * np.pi / 10)]])
+        self.ttargets = np.array([is_inside(x) for x in self.origin_features.dot(test)])
 
     @staticmethod
     def plot_dataset(ax_x, ax_y, title):
@@ -88,3 +103,16 @@ class TestHardShape(unittest.TestCase):
 
         model = Yala(**self.p_yala)
         model.fit(self.augmented_features, self.stargets, **{"perf_plotter": self.perf_plotter})
+
+    def test_triangle_hard(self):
+        """
+        python -m unittest tests.units.test_hard_shape.TestHardShape.test_triangle_hard
+
+        """
+        # Instantiate visualizer
+        self.perf_plotter = PerfPlotter(
+            self.origin_features, self.ttargets, list(range(len(self.ttargets)))
+        )
+
+        model = Yala(**self.p_yala)
+        model.fit(self.augmented_features, self.ttargets, **{"perf_plotter": self.perf_plotter})

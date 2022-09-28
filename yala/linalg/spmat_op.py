@@ -1,4 +1,5 @@
 # Global import
+from math import ceil
 from typing import List, Tuple
 from scipy.sparse import lil_matrix, hstack
 from itertools import groupby
@@ -41,7 +42,7 @@ def shrink(sax_inputs, bitmap, n_shrink=2):
             for cind, l_sub_inds in it:
                 # Get list of nonzero inds and set nb ind to shrink
                 l_sub_linds = list(map(itemgetter(0), l_sub_inds))
-                n_sub_shrink = min(int(len(l_sub_linds) / 2), n_shrink)
+                n_sub_shrink = min(ceil(len(l_sub_linds) / 2) - 1, n_shrink)
 
                 # Get inds to shrink
                 l_sub_linds = list(range(min(l_sub_linds), min(l_sub_linds) + n_sub_shrink)) + \
@@ -147,6 +148,7 @@ def fill_gap(sax_inputs, bitmap):
 def explode(sax_inputs, bitmap, partitions):
     # Build input
     sax_inputs = hstack([sax_inputs[:, [i] * bitmap.nf].multiply(bitmap.bf_map) for i in range(len(partitions))])
+
     # udpate partitions
     partitions = [{'contract_id': f'{i}', **p} for i, p in enumerate(partitions) for _ in range(bitmap.nf)]
 

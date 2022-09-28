@@ -24,15 +24,20 @@ class Sampler:
         (n_inputs, n_features) = self.bitmap.bf_map.shape
 
         # Sample features
-        ax_indices = np.hstack([np.random.choice(n_features, self.n_bounds, replace=False) for _ in range(n_verts)])
-        sax_mask = lil_matrix((n_features, n_verts), dtype=bool)
-        sax_mask[ax_indices, np.array([i // self.n_bounds for i in range(self.n_bounds * n_verts)])] = True
+        # TODO: tmp test
+        sax_sampled = expand(
+            self.server.get_random_samples(n_verts).T, self.bitmap, n_bits // 2
+        )
+        #
+        #ax_indices = np.hstack([np.random.choice(n_features, self.n_bounds, replace=False) for _ in range(n_verts)])
+        #sax_mask = lil_matrix((n_features, n_verts), dtype=bool)
+        #sax_mask[ax_indices, np.array([i // self.n_bounds for i in range(self.n_bounds * n_verts)])] = True
 
         # Sample inputs and expand it
-        sax_sampled = expand(
-            self.server.get_random_samples(n_verts).T.multiply(self.bitmap.f2b(sax_mask.tocsr())),
-            self.bitmap, n_bits // 2
-        )
+        #sax_sampled = expand(
+        #    self.server.get_random_samples(n_verts).T.multiply(self.bitmap.f2b(sax_mask.tocsr())),
+        #    self.bitmap, n_bits // 2
+        #)
         # Create comp and compute precisions
         comp = FgComponents(
             inputs=sax_sampled, mask_inputs=sax_sampled, levels=self.bitmap.b2f(sax_sampled).A.sum(axis=1),

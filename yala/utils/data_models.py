@@ -176,20 +176,17 @@ class ConvexHullProba:
 
 @dataclass
 class DrainerParameters:
-    total_size: int
     batch_size: int
     margin: float
-    weights: Optional[np.array] = None
-    precisions: Optional[np.array] = None
 
-    def limit_precisions(self):
-        return (self.precisions - self.margin).clip(min=self.margin + 0.01)
+    def limit_precisions(self, ax_p):
+        return (ax_p - self.margin).clip(min=self.margin + 0.01)
 
 
 @dataclass
 class TrackerParameters:
-    min_delta_area: float
+    min_diff_area: float
     min_area: float
-    max_no_changes: int
+    max_inactive: int
 
 

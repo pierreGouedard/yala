@@ -1,7 +1,6 @@
 # Global import
 from matplotlib import pyplot as plt
 from numpy import arange, array, int32
-from copy import deepcopy as copy
 
 # Local import
 from yala.utils.data_models import FgComponents
@@ -32,7 +31,7 @@ class Tracker:
         ax_precs, ax_labels = ax_precs.max(axis=0), ax_precs.argmax(axis=0)
 
         comps.partitions = [
-            {**d, 'precision': ax_precs[i], 'label_id': ax_labels[i], 'area': ax_areas[i]}
+            {**d, 'level': comps.levels[i], 'precision': ax_precs[i], 'label_id': ax_labels[i], 'area': ax_areas[i]}
             for i, d in enumerate(comps.partitions)
         ]
 
@@ -47,6 +46,7 @@ class Tracker:
 
         self.tracking[cid]['area'] = d_new_metrics['area']
         self.tracking[cid]['precision'] = d_new_metrics['precision']
+        self.tracking[cid]['level'] = d_new_metrics['level']
         self.tracking[cid]['historic'].append((d_new_metrics['area'], d_new_metrics['precision']))
 
         return self
@@ -58,22 +58,24 @@ class Tracker:
 
         # Set stage of comps
         for i, comp in enumerate(comps):
-            cid, d_new_metrics = comp.partitions[0]['id'], comp.partitions[0]
+            cid, d_new_metrics = comp.partitions[0]['id'], {**comp.partitions[0], 'level': comp.levels[0]}
 
             if d_new_metrics['area'] < self.tracker_params.min_area or comp.levels[0] == 1:
                 comps.partitions[i]['stage'] = 'done'
                 self.update_tracking(cid, d_new_metrics)
                 continue
 
-            # Test whether the min precision and size gain is reached
+            # Test whether the area gain or level delta is not changing
             delta_area = abs(d_new_metrics['area'] - self.tracking[cid]['area']) / self.tracking[cid]['area']
-            if delta_area < self.tracker_params.min_delta_area:
-                self.tracking[cid]['n_no_changes'] = self.tracking[cid].get('n_no_changes', 0) + 1
+            delta_level = abs(d_new_metrics['level'] - self.tracking[cid]['level'])
 
-                if self.tracking[cid]['n_no_changes'] > self.tracker_params.max_no_changes:
+            if delta_area < self.tracker_params.min_diff_area and delta_level > 0:
+                self.tracking[cid]['n_inactive'] = self.tracking[cid].get('n_inactive', 0) + 1
+
+                if self.tracking[cid]['n_inactive'] > self.tracker_params.max_inactive:
                     comps.partitions[i]['stage'] = 'done'
             else:
-                self.tracking[cid]['n_no_changes'] = 0
+                self.tracking[cid]['n_inactive'] = 0
 
             self.update_tracking(cid, d_new_metrics)
 

@@ -1,45 +1,74 @@
 # Global import
-import numpy as np
 from random import choices
 from string import ascii_uppercase
-from scipy.sparse import csr_matrix, lil_matrix
+from numpy import arange, zeros
+from numpy.random import choice
+from scipy.sparse import csr_matrix
 
 # Local import
-from yala.utils.data_models import ConvexHullProba, FgComponents
-from .firing_graph import YalaFiringGraph
+from firing_graph.servers import ArrayServer
+from yala.firing_graph import YalaFiringGraph
+from yala.utils.data_models import FgComponents, BitMap
 from yala.linalg.spmat_op import expand
 
 
-class Sampler:
-    """Sampling bounds for firing graph"""
+class YalaServer(ArrayServer):
+    """Specific server for YALA app"""
 
-    def __init__(self, server, bitmap, n_bounds=2):
-        self.server = server
-        self.bitmap = bitmap
-        self.n_bounds = n_bounds
-        self.ch_probas = ConvexHullProba()
+    def __init__(self, X, y, bf_map, n_bounds_start=2, n_bounds_incr=2):
+        self.__bf_map = bf_map
+        self.__sax_forward = X.tocsr()
 
-    def init_sample(self, n_verts, n_bits):
-        # Get dimensions
-        (n_inputs, n_features) = self.bitmap.bf_map.shape
+        # Get first feature mask and update data forward
+        self.feature_mask, self.bit_mask = self.init_masks(bf_map, bf_map.shape[1], n_bounds_start)
+        self.sax_forward = self.__sax_forward.multiply(csr_matrix(self.bit_mask))
 
-        # Sample features
-        # TODO: tmp test
+        # Bild current bitmask
+        self.curr_bitmap = BitMap(bf_map[:, self.feature_mask], bf_map.shape[0], self.feature_mask.sum())
+
+        # Other params
+        self.n_bounds_start = n_bounds_start
+        self.n_bounds_incr = n_bounds_incr
+
+        super().__init__(X, y)
+
+    @property
+    def bitmap(self):
+        return self.curr_bitmap
+
+    @staticmethod
+    def init_masks(bf_map, n_features, n_bounds_start):
+        ax_feature_mask = zeros(n_features, dtype=bool)
+        ax_feature_mask[arange(0, n_features, n_features // n_bounds_start)] = True
+        ax_bit_mask = bf_map[:, ax_feature_mask].A.any(axis=1)
+
+        return ax_feature_mask, ax_bit_mask
+
+    def update_masks(self, ):
+        # Get remaining candidate
+        l_candidates = [i for i in range(len(self.feature_mask)) if not self.feature_mask[i]]
+        if not len(l_candidates):
+            return l_candidates
+
+        l_new = choice(l_candidates, self.n_bounds_incr, replace=False)
+
+        # Update feature and bitmask
+        self.feature_mask[l_new] = True
+        self.bit_mask = self.__bf_map[:, self.feature_mask].A.any(axis=1)
+        self.sax_forward = self.__sax_forward.multiply(csr_matrix(self.bit_mask))
+        self.curr_bitmap = BitMap(self.__bf_map[:, self.feature_mask], self.__bf_map.shape[0], self.feature_mask.sum())
+
+        return l_new
+
+    def init_sampling(self, n_verts, n_bits):
+        # Sample data point
         sax_sampled = expand(
-            self.server.get_random_samples(n_verts).T, self.bitmap, n_bits // 2
-        )
-        #
-        #ax_indices = np.hstack([np.random.choice(n_features, self.n_bounds, replace=False) for _ in range(n_verts)])
-        #sax_mask = lil_matrix((n_features, n_verts), dtype=bool)
-        #sax_mask[ax_indices, np.array([i // self.n_bounds for i in range(self.n_bounds * n_verts)])] = True
+            self.get_random_samples(n_verts).multiply(csr_matrix(self.bit_mask, dtype=bool)).T,
+            self.bitmap, n_bits // 2
+        ).multiply(csr_matrix(self.bit_mask, dtype=bool).T)
 
-        # Sample inputs and expand it
-        #sax_sampled = expand(
-        #    self.server.get_random_samples(n_verts).T.multiply(self.bitmap.f2b(sax_mask.tocsr())),
-        #    self.bitmap, n_bits // 2
-        #)
         # Create comp and compute precisions
-        comp = FgComponents(
+        comps = FgComponents(
             inputs=sax_sampled, mask_inputs=sax_sampled, levels=self.bitmap.b2f(sax_sampled).A.sum(axis=1),
             partitions=[
                 {'label_id': 0, 'id': ''.join(choices(ascii_uppercase, k=5)), "stage": "ongoing"}
@@ -47,46 +76,19 @@ class Sampler:
             ],
         )
 
-        return comp
+        return comps
 
-    def sample_bounds(self, base_components, batch_size, n_bounds):
-        # Get convex components
-        ch_components = YalaFiringGraph.from_comp(base_components) \
-            .get_convex_hull(self.server, batch_size, self.bitmap)
+    def update_bounds(self, comps):
 
-        # Sample new bounds from CH
-        sax_sampled = csr_matrix(self.sample_from_proba(base_components, n_bounds).T, dtype=bool)
-        ch_components.update(inputs=ch_components.inputs.multiply(self.bitmap.f2b(sax_sampled)))
+        l_new_indices = self.update_masks()
+        if not len(l_new_indices) or comps.empty:
+            return True
 
-        # Update base component's bounds
-        base_components = base_components.update(
-            inputs=base_components.inputs + ch_components.inputs,
-            levels=base_components.levels + sax_sampled.sum(axis=0).A[0, :]
+        ch_comps = YalaFiringGraph.from_comp(comps).get_convex_hull(self)
+        ch_comps.update(
+            inputs=ch_comps.inputs.multiply(sum([self.__bf_map[:, int(i)] for i in l_new_indices]))
         )
+        comps.inputs = comps.inputs + ch_comps.inputs
+        comps.levels = self.bitmap.b2f(comps.inputs).sum(axis=1).A[:, 0]
 
-        # Update bounds proba
-        self.ch_probas.add(ch_components, self.bitmap)
-
-        return base_components
-
-    def sample_from_proba(self, comps, n_bounds=None):
-        ax_p = self.ch_probas.get_probas(comps, self.bitmap)
-        n_bounds = n_bounds or self.n_bounds
-
-        # Prepare choice
-        (ny, nx), ax_linear = ax_p.shape, np.arange(ax_p.shape[1])
-        ax_counts = np.minimum((ax_p > 0).sum(axis=1), n_bounds) * ((ax_p > 0).sum(axis=1) >= n_bounds)
-
-        def masked_choice(ax_p_, n_):
-            return list(np.random.choice(ax_linear, n_, replace=False, p=ax_p_))
-
-        # Random coordinate choice
-        l_y_ind = sum([[i] * ax_counts[i] for i in range(ny)], [])
-        l_x_ind = sum([masked_choice(ax_p[i, :], ax_counts[i]) for i in range(ny)], [])
-
-        # Create new mask features
-        ax_mask_sampled = np.zeros((ny, nx), dtype=bool)
-        if l_y_ind:
-            ax_mask_sampled[l_y_ind, l_x_ind] = True
-
-        return ax_mask_sampled
+        return False

@@ -1,51 +1,47 @@
 # Global import
 
 # Local import
-from firing_graph.servers import ArrayServer
-from yala.utils.data_models import DrainerParameters, TrackerParameters, BitMap
+from yala.utils.data_models import DrainerParameters, TrackerParameters
 from .encoder import MultiEncoders
 from .drainers.shaper import Shaper
 from .cleaner import Cleaner
 from .tracker import Tracker
-from .sampler import Sampler
+from .server import YalaServer
 from .utils.visual import Visualizer
+
 
 class Yala(object):
 
     def __init__(self,
                  n_run=5,
-                 max_iter=20,
                  batch_size=1000,
-                 draining_size=500,
                  draining_margin=0.05,
                  n_parallel=50,
-                 n_update=1,
-                 min_delta_area=0.05,
-                 max_no_changes=3,
+                 n_bounds_start=6,
+                 n_bounds_incr=2,
+                 min_diff_area=0.05,
+                 max_inactive=2,
                  n_bin=10,
                  bin_method='quantile',
                  bin_missing=False,
                  ):
         # Core parameters
         self.n_run = n_run
-        self.max_iter = max_iter
         self.n_parallel = n_parallel
-        self.n_update = n_update
+        self.n_bounds_start, self.n_bounds_incr = n_bounds_start, n_bounds_incr
 
         # Encoder params
         self.encoder = MultiEncoders(n_bin, bin_method, bin_missing=bin_missing)
         self.server = None
 
         # Drainer params
-        self.drainer_params = DrainerParameters(total_size=draining_size, batch_size=batch_size, margin=draining_margin)
+        self.drainer_params = DrainerParameters(batch_size=batch_size, margin=draining_margin)
 
         # Tracker params
-        self.tracker_params = TrackerParameters(
-            min_delta_area=min_delta_area, max_no_changes=max_no_changes, min_area=5
-        )
+        self.tracker_params = TrackerParameters(min_diff_area=min_diff_area, max_inactive=max_inactive, min_area=5)
 
         # Yala Core attributes
-        self.firing_graph, self.bitmap = None, None
+        self.firing_graph = None
 
     def fit(self, X, y, **kwargs):
         """
@@ -57,27 +53,25 @@ class Yala(object):
         """
         # encode: X is a numpy/scipy array, y in numpy/scipy array
         X_enc, y_enc = self.encoder.fit_transform(X=X, y=y)
-        self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
-        self.server = ArrayServer(X_enc, y_enc).stream_features()
+        self.server = YalaServer(X_enc, y_enc, self.encoder.bf_map, self.n_bounds_start, self.n_bounds_incr)
 
         # Gte core components
-        visualizer = Visualizer(kwargs.get('perf_plotter', None), self.bitmap)
-        shaper = Shaper(self.server, self.bitmap, self.drainer_params, True, visualizer)
-        cleaner = Cleaner(self.server, self.bitmap, self.drainer_params.batch_size)
-        sampler = Sampler(self.server, self.bitmap)
+        visualizer = Visualizer(kwargs.get('perf_plotter', None))
+        shaper = Shaper(self.server, self.drainer_params, False, visualizer)
+        cleaner = Cleaner(self.server, self.drainer_params.batch_size)
 
         for i in range(self.n_run):
             print("[YALA]: Iteration {}".format(i))
 
             # Initial sampling
-            base_components = sampler.init_sample(self.n_parallel, n_bits=7)
+            base_components = self.server.init_sampling(self.n_parallel, n_bits=7)
 
             # Instantiate tracking
             tracker = Tracker(self.tracker_params, self.server).update_metrics(base_components, update_tracking=True)
 
             # Core loop
-            i = 0
-            while len(base_components) > 0 and i < self.max_iter:
+            stop = False
+            while not stop:
                 # Shape components
                 base_components = shaper.shape(base_components)
 
@@ -87,20 +81,15 @@ class Yala(object):
                 # Check for component that has converged
                 base_components = tracker.refresh_tracking(base_components)
 
-                # exit loop if all comp have merged
-                if base_components.empty:
-                    break
+                # Exit loop if comps is empty or all bounds explored otherwise sample new bounds
+                stop = self.server.update_bounds(base_components)
 
-                # Resample new bounds for base components that have not converged yet
-                sampler.sample_bounds(base_components, self.drainer_params.batch_size, 1)
-
-                # Visualize training
-                i += 1
-                if i % 5 == 0:
-                    tracker.visualize_indicators()
-
+            # Visualize kpis
             tracker.visualize_indicators()
             complete_components = tracker.conv_comps
-            self.visualizer.visualize_comp(complete_components)
+            if not base_components.empty:
+                complete_components += base_components
+
+            visualizer.visualize_comp(complete_components, self.server)
 
         return self

@@ -71,9 +71,9 @@ class YalaFiringGraph(FiringGraph):
 
         return YalaFiringGraph(**kwargs)
 
-    def get_convex_hull(self, server, n, bitmap):
+    def get_convex_hull(self, server):
         # Get masked activations
-        sax_x = server.next_forward(n=n, update_step=False).sax_data_forward
+        sax_x = server.next_all_forward().sax_data_forward
 
         # propagate through firing graph
         sax_fg = self.seq_propagate(sax_x)
@@ -82,7 +82,7 @@ class YalaFiringGraph(FiringGraph):
         sax_product = sax_x.T.dot(sax_fg)
 
         return FgComponents(
-            inputs=fill_gap(sax_product, bitmap), mask_inputs=csr_matrix((0, 0)),
+            inputs=fill_gap(sax_product, server.bitmap), mask_inputs=csr_matrix((0, 0)),
             levels=np.ones(sax_fg.shape[1]), partitions=self.partitions
         )
 

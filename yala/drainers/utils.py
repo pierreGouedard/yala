@@ -39,7 +39,7 @@ class MaskManager:
 
         # Track changes and decrement counter with no changes
         self.changes += ax_mask
-        self.counter[~ax_mask] = self.counter[~ax_mask] - 1
+        self.counter -= 1
 
         return self
 
@@ -63,7 +63,6 @@ class MaskManager:
                 else:
                     conv_comps += comps.pop(i)
                     self._pop(i)
-                    print(f'{i} pop')
             else:
                 i += 1
 
