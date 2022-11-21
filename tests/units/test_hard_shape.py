@@ -9,6 +9,11 @@ from yala.yala import Yala
 from tests.units.utils import PerfPlotter
 
 
+# TODO: remove the notion of precision, it should always be one with a 5% tolerance
+#       Maybe do smaller bs so that link are removed very fast (not sure about this one though)
+#       create the sampler / target encoder
+#       Modify encoder (nbin very closed too reality)
+
 class TestHardShape(unittest.TestCase):
     show_dataset = True
     p_yala = {
@@ -27,6 +32,7 @@ class TestHardShape(unittest.TestCase):
         self.setup_circle_shape()
         self.setup_square_shape()
         self.setup_triangle_shape()
+        self.setup_bold_line_shape()
 
         # augment dataset
         if self.type_basis == 'random':
@@ -40,7 +46,8 @@ class TestHardShape(unittest.TestCase):
         if self.show_dataset:
             self.plot_dataset(self.origin_features, self.ctargets, 'Circle shapes')
             self.plot_dataset(self.origin_features, self.stargets, 'Square shapes')
-            self.plot_dataset(self.origin_features, self.ttargets, 'Truangle shapes')
+            self.plot_dataset(self.origin_features, self.ttargets, 'Triangle shapes')
+            self.plot_dataset(self.origin_features, self.bltargets, 'Bold line shapes')
 
     def setup_circle_shape(self):
         # Create datasets
@@ -64,12 +71,21 @@ class TestHardShape(unittest.TestCase):
         ax_line = np.array([-1, -1])
 
         def is_inside(x):
-            in_square = all([x[i] - center[0][i] > 0 for i in range(2)])
             return all([x[i] - center[0][i] > 0 for i in range(2)]) and x.dot(ax_line) + 1 > 0
 
         # Compute labels
         test = np.array([[np.cos(np.pi / 10), np.cos(6 * np.pi / 10)], [np.sin(np.pi / 10), np.sin(6 * np.pi / 10)]])
         self.ttargets = np.array([is_inside(x) for x in self.origin_features.dot(test)])
+
+    def setup_bold_line_shape(self):
+        l_lines = [np.array([-1, -1]), np.array([1, 1])]
+
+        def is_inside(x):
+            return x.dot(l_lines[0]) + 1 > 0 and x.dot(l_lines[1]) - 0.5 > 0
+
+        # Compute labels
+        test = np.array([[np.cos(np.pi / 10), np.cos(6 * np.pi / 10)], [np.sin(np.pi / 10), np.sin(6 * np.pi / 10)]])
+        self.bltargets = np.array([is_inside(x) for x in self.origin_features.dot(test)])
 
     @staticmethod
     def plot_dataset(ax_x, ax_y, title):
@@ -116,3 +132,17 @@ class TestHardShape(unittest.TestCase):
 
         model = Yala(**self.p_yala)
         model.fit(self.augmented_features, self.ttargets, **{"perf_plotter": self.perf_plotter})
+
+    def test_bold_line_hard(self):
+        """
+        python -m unittest tests.units.test_hard_shape.TestHardShape.test_bold_line_hard
+
+        """
+        # Instantiate visualizer
+        self.perf_plotter = PerfPlotter(
+            self.origin_features, self.ttargets, list(range(len(self.bltargets)))
+        )
+
+        model = Yala(**self.p_yala)
+        model.fit(self.augmented_features, self.bltargets, **{"perf_plotter": self.perf_plotter})
+
