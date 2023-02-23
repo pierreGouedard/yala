@@ -4,12 +4,11 @@ import numpy as np
 import unittest
 
 # Local import
-from firing_graph.servers import ArrayServer
+from yala.server import YalaServer
 from yala.firing_graph import YalaFiringGraph
 from yala.encoder import MultiEncoders
 from yala.utils.data_models import BitMap
 from yala.cleaner import Cleaner
-from yala.sampler import Sampler
 from tests.units.utils import PerfPlotter
 
 
@@ -30,20 +29,15 @@ class TestCleaner(unittest.TestCase):
         # Build model's element
         self.encoder = MultiEncoders(50, 'quantile', bin_missing=False)
         X_enc, y_enc = self.encoder.fit_transform(X=self.augmented_features, y=self.targets)
-        self.server = ArrayServer(X_enc, y_enc).stream_features()
+        self.server = YalaServer(X_enc, y_enc, self.encoder.bf_map, n_bounds_start=2, n_bounds_incr=1)\
+            .stream_features()
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
-        self.cleaner = Cleaner(self.server, self.bitmap, 3000, perf_plotter=self.perf_plotter, plot_perf_enable=True)
-        self.sampler = Sampler(self.server, self.bitmap)
+        self.cleaner = Cleaner(self.server, 15000, perf_plotter=self.perf_plotter, plot_perf_enable=True)
 
         # Build test components
-        self.test_component = self.sampler.init_sample(1, n_bits=10)
+        self.test_component = self.server.init_sampling(1, n_bits=10)
         self.test_component_ch = YalaFiringGraph.from_comp(self.test_component)\
-            .get_convex_hull(self.server, 3000, self.bitmap)
-
-        print("======= Test component input ======= ")
-        print(self.bitmap.b2f(self.test_component.inputs).A)
-        print("======= Test component CH input ======= ")
-        print(self.bitmap.b2f(self.test_component_ch.inputs).A)
+            .get_convex_hull(self.server)
 
     def sample(self, n):
         # Select 1 additional bound to clean
@@ -57,15 +51,14 @@ class TestCleaner(unittest.TestCase):
 
         """
         # Select 1 additional bound to clean
-        sax_inputs = self.sample(1)
+        self.server.update_bounds(self.test_component)
         print("======= CH sampled ======= ")
-        print(self.bitmap.b2f(sax_inputs).A)
+        print(self.bitmap.b2f(self.test_component.inputs).A)
 
         # Clean component
-        clean_component = self.cleaner.clean_component(
-            self.test_component_ch.copy(inputs=sax_inputs, levels=np.ones(1) * 3)
-        )
-
+        clean_component = self.cleaner.clean_component(self.test_component)
+        import IPython
+        IPython.embed()
         self.assertTrue(
             (self.bitmap.b2f(self.test_component.inputs > 0).A == self.bitmap.b2f(clean_component.inputs > 0).A).all()
         )

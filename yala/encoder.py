@@ -1,16 +1,20 @@
 # Local import
 import numpy as np
-from scipy.sparse import csr_matrix, hstack
+from scipy.sparse import csr_matrix, csc_matrix, hstack
 
 # Global import
 
 
 class Encoder(object):
-    def __init__(self, n_bin, bin_method='uniform', bin_missing=False, min_val_by_bin=10):
+    def __init__(
+            self, n_bin, bin_method='uniform', bin_missing=False, min_val_by_bin=10,
+            quantile_offset: float = 0.02
+    ):
 
         # Core parameters
         self.n_bin, self.bin_method, self.bin_missing = n_bin, bin_method, bin_missing
         self.min_val_by_bin = min_val_by_bin
+        self.quantile_offset = quantile_offset
 
         self.total_size = self.n_bin + self.bin_missing
 
@@ -26,7 +30,7 @@ class Encoder(object):
         ax_unique = np.unique(x)
 
         # If not enough unique values, treat it as a cat value and hot encode it
-        if len(ax_unique) < (self.n_bin * self.min_val_by_bin):
+        if len(ax_unique) <= (self.n_bin * self.min_val_by_bin):
             self.bins = ax_unique
             self.n_bin = len(ax_unique)
             self.update_total_size()
@@ -35,7 +39,7 @@ class Encoder(object):
 
         # Encode numerical values
         if self.bin_method == 'uniform':
-            bounds = np.quantile(x[~np.isnan(x)], [0.02, 0.98])
+            bounds = np.quantile(x[~np.isnan(x)], [self.quantile_offset, 1 - self.quantile_offset])
             self.bins = np.linspace(bounds[0], bounds[1], num=self.n_bin)
 
         elif self.bin_method == 'quantile':
@@ -66,15 +70,21 @@ class Encoder(object):
         if self.bin_missing:
             ax_activation = np.hstack([ax_activation, ~ax_activation.any(axis=1, keepdims=True)])
 
-        return csr_matrix(ax_activation)
+        return csc_matrix(ax_activation)
 
 
 class MultiEncoders():
     _NUMERIC_KINDS = set('buifc')
 
-    def __init__(self, n_bin, bin_method, bin_missing=False):
+    def __init__(
+            self, n_bin, bin_method, bin_missing=False, min_val_by_bin: int = 10, quantile_offset: float = 0.02
+    ):
         # global parameters
-        self.p_encoder = {"n_bin": n_bin, "bin_method": bin_method, "bin_missing": bin_missing}
+        self.p_encoder = {
+            "n_bin": n_bin, "bin_method": bin_method, "bin_missing": bin_missing,
+            "min_val_by_bin": min_val_by_bin, "quantile_offset": quantile_offset
+
+        }
 
         # parameters to fit
         self.basis = None
