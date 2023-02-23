@@ -20,13 +20,6 @@ class Cleaner:
         self.visualizer = Visualizer(perf_plotter)
 
     def clean_component(self, components):
-        # TODO: there may exists a way faster method: take [d * (d-1) / 2] intersection (2 | d (level=2)) if a bound is
-        #   support there is at least one intersection that occurs outside of the bounds of this feature,
-        #   if a bound is not support, no intersect of all other bound occur inside the bound of ths feature.
-        #   This new method enables to limit the complexity of this method.
-        #   Indeed now we just need to propagate on the same number of vertices on inputs that has only there bounds
-        #   active. sax_fg.dot(sax_x) => (n vertices * n_inputs) then do the logic with components.inputs.
-        #   Problem> if all bounds are support (all other intersection occurs inside the bound tested)
         # Create Mask and exploded firing graph
         msk_comp = components.copy(levels=components.levels - 1)
         msk_fg = YalaFiringGraph.from_comp(msk_comp)
@@ -58,7 +51,6 @@ class Cleaner:
         sax_x = self.server.next_forward(n=self.batch_size, update_step=False).sax_data_forward
 
         # Explode mask output
-        # TODO: this operation is very memory intensive. (*nf the size that may be very large)
         l_indices = sum([[i] * self.server.bitmap.nf for i in range(len(msk_fg.partitions))], [])
         sax_msk = msk_fg.seq_propagate(sax_x)[:, l_indices]
 

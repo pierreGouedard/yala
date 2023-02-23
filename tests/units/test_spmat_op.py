@@ -5,7 +5,6 @@ import unittest
 
 # Local import
 from firing_graph.servers import ArrayServer
-from yala.sampler import Sampler
 from yala.encoder import MultiEncoders
 from yala.utils.data_models import BitMap, FgComponents
 from yala.linalg.spmat_op import shrink, expand, bounds, add_connex
@@ -25,7 +24,6 @@ class TestSpmatOp(unittest.TestCase):
         X_enc, y_enc = self.encoder.fit_transform(X=self.augmented_features, y=np.random.binomial(1, 0.5, 20000))
         self.server = ArrayServer(X_enc, y_enc).stream_features()
         self.bitmap = BitMap(self.encoder.bf_map, self.encoder.bf_map.shape[0], self.encoder.bf_map.shape[1])
-        self.sampler = Sampler(self.server, self.bitmap)
 
         # Build test components
         self.test_components = self.build_random_comp()
@@ -37,7 +35,7 @@ class TestSpmatOp(unittest.TestCase):
         print(self.bitmap.b2f(self.test_conn_components.inputs).A)
 
     def build_random_comp(self):
-        return self.sampler.init_sample(2, n_bits=self.n_vertices)
+        return self.server.init_sampling(2, n_bits=self.n_vertices)
 
     def build_conn_comp(self):
         sax_inputs = lil_matrix((self.bitmap.nb, self.n_vertices), dtype=bool)
